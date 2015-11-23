@@ -152,13 +152,14 @@ uint32_t sdhci_clk_supply(struct sdhci_host *host, uint32_t clk)
 	uint32_t div = 0;
 	uint32_t freq = 0;
 	uint16_t clk_val = 0;
+	struct mmc_device *dev = (struct mmc_device*)host;
 
-	if (clk >= host->caps.base_clk_rate)
+	if (clk >= dev->config.max_clk_rate)
 		goto clk_ctrl;
 
 	/* As per the sd spec div should be a multiplier of 2 */
 	for (div = 2; div < SDHCI_CLK_MAX_DIV; div += 2) {
-		freq = host->caps.base_clk_rate / div;
+		freq = dev->config.max_clk_rate / div;
 		if (freq <= clk)
 			break;
 	}
