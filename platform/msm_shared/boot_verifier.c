@@ -229,6 +229,7 @@ static bool verify_image_with_sig(unsigned char* img_addr, uint32_t img_size,
 	int shift_bytes;
 	RSA *rsa = NULL;
 	bool keystore_verification = false;
+	int attr = 0;
 
 	if(!strcmp(pname, "keystore"))
 		keystore_verification = true;
@@ -267,8 +268,17 @@ static bool verify_image_with_sig(unsigned char* img_addr, uint32_t img_size,
 
 	/* append attribute to image */
 	if(!keystore_verification)
-		img_size += add_attribute_to_img((unsigned char*)(img_addr + img_size),
+	{
+		// verifying a non keystore partition
+		attr = add_attribute_to_img((unsigned char*)(img_addr + img_size),
 				sig->auth_attr);
+		if (img_size > (UINT_MAX - attr))
+		{
+			dprintf(CRITICAL,"Interger overflow detected\n");
+			ASSERT(0);
+		}
+		else img_size += attr;
+	}
 
 	/* compare SHA256SUM of image with value in signature */
 	if(ks != NULL)
