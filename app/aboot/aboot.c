@@ -267,6 +267,10 @@ unsigned char *update_cmdline(const char * cmdline)
 		cmdline_len = strlen(cmdline);
 		have_cmdline = 1;
 	}
+	else {
+		dprintf(CRITICAL,"cmdline is NULL\n");
+		ASSERT(0);
+	}
 	if (target_is_emmc_boot()) {
 		cmdline_len += strlen(emmc_cmdline);
 #if USE_BOOTDEV_CMDLINE
