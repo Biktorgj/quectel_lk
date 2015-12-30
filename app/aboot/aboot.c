@@ -272,6 +272,7 @@ unsigned char *update_cmdline(const char * cmdline)
 #if USE_BOOTDEV_CMDLINE
 		boot_dev_buf = (char *) malloc(sizeof(char) * BOOT_DEV_MAX_LEN);
 		ASSERT(boot_dev_buf);
+		memset((void *)boot_dev_buf, 0, sizeof(*boot_dev_buf));
 		platform_boot_dev_cmdline(boot_dev_buf);
 		cmdline_len += strlen(boot_dev_buf);
 #endif
