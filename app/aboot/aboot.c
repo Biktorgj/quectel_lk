@@ -2783,6 +2783,11 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 	struct ptable *ptable;
 	unsigned extra = 0;
 
+	if((uintptr_t)data > (UINT_MAX - sz)) {
+		fastboot_fail("Cannot flash: image header corrupt");
+                return;
+        }
+
 	ptable = flash_get_ptable();
 	if (ptable == NULL) {
 		fastboot_fail("partition table doesn't exist");
@@ -2798,8 +2803,10 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 	}
 
 	if (!strcmp(ptn->name, "boot") || !strcmp(ptn->name, "recovery")) {
-		if (memcmp((void *)data, BOOT_MAGIC, BOOT_MAGIC_SIZE)) {
-			fastboot_fail("image is not a boot image");
+		if((sz > BOOT_MAGIC_SIZE) && (!memcmp((void *)data, BOOT_MAGIC, BOOT_MAGIC_SIZE))) {
+			dprintf(INFO, "Verified the BOOT_MAGIC in image header  \n");
+		} else {
+			fastboot_fail("Image is not a boot image");
 			return;
 		}
 	}
@@ -2810,11 +2817,15 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 		|| !strcmp(ptn->name, "recoveryfs")
 		|| !strcmp(ptn->name, "modem"))
 		extra = 1;
-	else
-		sz = ROUND_TO_PAGE(sz, page_mask);
+	else {
+		if (sz % page_size) {
+			fastboot_fail("Buffer size is not aligned to page_size");
+			return;
+		}
+	}
 
 	dprintf(INFO, "writing %d bytes to '%s'\n", sz, ptn->name);
-	if (!memcmp((void *)data, UBI_MAGIC, UBI_MAGIC_SIZE)) {
+	if ((sz > UBI_MAGIC_SIZE) && (!memcmp((void *)data, UBI_MAGIC, UBI_MAGIC_SIZE))) {
 		if (flash_ubi_img(ptn, data, sz)) {
 			fastboot_fail("flash write failure");
 			return;
