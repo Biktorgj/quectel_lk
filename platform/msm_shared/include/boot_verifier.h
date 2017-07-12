@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2015 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -155,7 +155,7 @@ uint32_t boot_verify_get_state();
 /* Print current boot state */
 void boot_verify_print_state();
 /* Function to validate keystore */
-bool boot_verify_validate_keystore(unsigned char * user_addr);
+bool boot_verify_validate_keystore(unsigned char * user_addr, unsigned sz);
 /* Function to check if partition is allowed to flash in verified mode */
 bool boot_verify_flash_allowed(const char * entry);
 bool boot_verify_compare_sha256(unsigned char *image_ptr,

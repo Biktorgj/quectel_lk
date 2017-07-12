@@ -2,7 +2,7 @@
  * Copyright (c) 2009, Google Inc.
  * All rights reserved.
  *
- * Copyright (c) 2009-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2016, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -2325,7 +2325,7 @@ void cmd_flash_mmc_img(const char *arg, void *data, unsigned sz)
 					fastboot_fail("unlock device to flash keystore");
 					return;
 				}
-				if(!boot_verify_validate_keystore((unsigned char *)data))
+				if(!boot_verify_validate_keystore((unsigned char *)data,sz))
 				{
 					fastboot_fail("image is not a keystore file");
 					return;
