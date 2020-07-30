@@ -114,6 +114,39 @@
 #define USB_HS_SYSTEM_CMD_RCGR             (CLK_CTL_BASE + 0x41010)
 #define USB_HS_SYSTEM_CFG_RCGR             (CLK_CTL_BASE + 0x41014)
 
+#define MSM_SDC1_BASE               (PERIPH_SS_BASE + 0x00024000)
+#define MSM_SDC1_SDHCI_BASE         (PERIPH_SS_BASE + 0x00024900)
+#define MSM_SDC2_BASE               (PERIPH_SS_BASE + 0x00064000)
+#define MSM_SDC2_SDHCI_BASE         (PERIPH_SS_BASE + 0x00064900)
+
+/* SDHCI */
+#define SDCC_MCI_HC_MODE            (0x00000078)
+#define SDCC_HC_PWRCTL_STATUS_REG   (0x000000DC)
+#define SDCC_HC_PWRCTL_MASK_REG     (0x000000E0)
+#define SDCC_HC_PWRCTL_CLEAR_REG    (0x000000E4)
+#define SDCC_HC_PWRCTL_CTL_REG      (0x000000E8)
+
+/* SDCC */
+#define SDC1_HDRV_PULL_CTL          (TLMM_BASE_ADDR + 0x10A000)
+#define SDCC1_BCR                   (CLK_CTL_BASE + 0x42000)
+#define SDCC1_APPS_CBCR             (CLK_CTL_BASE + 0x42018)
+#define SDCC1_AHB_CBCR              (CLK_CTL_BASE + 0x4201C)
+#define SDCC1_CMD_RCGR              (CLK_CTL_BASE + 0x42004)
+#define SDCC1_CFG_RCGR              (CLK_CTL_BASE + 0x42008)
+#define SDCC1_M                     (CLK_CTL_BASE + 0x4200C)
+#define SDCC1_N                     (CLK_CTL_BASE + 0x42010)
+#define SDCC1_D                     (CLK_CTL_BASE + 0x42014)
+
+#define SDC2_HDRV_PULL_CTL          (TLMM_BASE_ADDR + 0x109000)
+#define SDCC2_BCR                   (CLK_CTL_BASE + 0x43000)
+#define SDCC2_APPS_CBCR             (CLK_CTL_BASE + 0x43018)
+#define SDCC2_AHB_CBCR              (CLK_CTL_BASE + 0x4301C)
+#define SDCC2_CMD_RCGR              (CLK_CTL_BASE + 0x43004)
+#define SDCC2_CFG_RCGR              (CLK_CTL_BASE + 0x43008)
+#define SDCC2_M                     (CLK_CTL_BASE + 0x4300C)
+#define SDCC2_N                     (CLK_CTL_BASE + 0x43010)
+#define SDCC2_D                     (CLK_CTL_BASE + 0x43014)
+
 #define TCSR_TZ_WONCE               0x193D000
 #define TCSR_BOOT_MISC_DETECT       0x193D100
 #endif

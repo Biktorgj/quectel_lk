@@ -54,6 +54,7 @@
 #include <shutdown_detect.h>
 #endif
 
+
 #define FASTBOOT_MODE           0x77665500
 #define PON_SOFT_RB_SPARE       0x88F
 
@@ -190,18 +191,32 @@ void target_init(void)
 	config.nand_base = MSM_NAND_BASE;
 	config.ee = QPIC_NAND_EE;
 	config.max_desc_len = QPIC_NAND_MAX_DESC_LEN;
+	dprintf(INFO, "Starting NAND\n");
 
 	qpic_nand_init(&config);
+	dprintf(INFO, "Starting partition table\n");
 
 	ptable_init(&flash_ptable);
+	dprintf(INFO, "SMEM Ptable Init()\n");
+
 	smem_ptable_init();
+	dprintf(INFO, "SMEM: Add Modem Partitions()\n");
+
 	smem_add_modem_partitions(&flash_ptable);
+	dprintf(INFO, "Update PTABLE Names()\n");
 
 	update_ptable_names();
+	dprintf(INFO, "Flash set ptable\n");
+
 	flash_set_ptable(&flash_ptable);
 
-	if (target_use_signed_kernel())
+	if (target_use_signed_kernel()) {
+		dprintf(INFO, "Signed kernel enabled, init crypto\n");
 		target_crypto_init_params();
+	} else {
+		dprintf(INFO, "Bik: Not using signed kernel :)\n");
+	}
+
 }
 
 /* Identify the current target */
@@ -256,7 +271,8 @@ int get_target_boot_params(const char *cmdline, const char *part, char **buf)
 {
 	struct ptable *ptable;
 	int system_ptn_index = -1;
-	uint32_t buflen = strlen(UBI_CMDLINE) + strlen(" root=ubi0:rootfs ubi.mtd=") + sizeof(int) + 1; /* 1 byte for null character*/
+	int modem_ptn_index = -1; //quectel add 20180312 modem partition index
+	uint32_t buflen = strlen(UBI_CMDLINE) + strlen(" root=ubi0:rootfs ubi.mtd=") + 2 * sizeof(int) + 1 + strlen(" ubi.mtd="); /* 1 byte for null character,jun20160709*/
 
 	*buf = (char *)malloc(buflen);
 	if(!(*buf)) {
@@ -277,6 +293,15 @@ int get_target_boot_params(const char *cmdline, const char *part, char **buf)
 		free(*buf);
 		return -1;
 	}
+	//quectel 20180312 add start get modem partition index
+ 	modem_ptn_index = ptable_get_index(ptable, "modem");
+	if (modem_ptn_index < 0) {
+		dprintf(CRITICAL,"WARN: Cannot get modem partition index for %s\n", "modem");
+		free(*buf);
+		return -1;
+	}
+	//quectel 20180312 add end
+
 	/* Adding command line parameters according to target boot type */
 	snprintf(*buf, buflen, UBI_CMDLINE);
 
@@ -287,7 +312,7 @@ int get_target_boot_params(const char *cmdline, const char *part, char **buf)
 		(strstr(cmdline, " root="))))
 		dprintf(DEBUG, "DEBUG: cmdline has root=\n");
 	else
-		snprintf(*buf+strlen(*buf), buflen, " root=ubi0:rootfs ubi.mtd=%d", system_ptn_index);
+		snprintf(*buf+strlen(*buf), buflen, " root=ubi0:rootfs ubi.mtd=%d ubi.mtd=%d", system_ptn_index, modem_ptn_index);// quectel add modem ubi index in here
 		/*in success case buf will be freed in the calling function of this*/
 	return 0;
 }
@@ -355,6 +380,74 @@ void reboot_device(unsigned reboot_reason)
 	return;
 }
 
+#if MMC_SDHCI_SUPPORT
+void rpm_smd_init();
+void regulator_enable(uint32_t enable);
+static void set_sdc_power_ctrl()
+{
+	/* Drive strength configs for sdc pins */
+	struct tlmm_cfgs sdc2_hdrv_cfg[] =
+	{
+		{ SDC2_CLK_HDRV_CTL_OFF,  TLMM_CUR_VAL_16MA, TLMM_HDRV_MASK, SDC2_HDRV_PULL_CTL },
+		{ SDC2_CMD_HDRV_CTL_OFF,  TLMM_CUR_VAL_10MA, TLMM_HDRV_MASK, SDC2_HDRV_PULL_CTL },
+		{ SDC2_DATA_HDRV_CTL_OFF, TLMM_CUR_VAL_6MA, TLMM_HDRV_MASK, SDC2_HDRV_PULL_CTL },
+	};
+
+	/* Pull configs for sdc pins */
+	struct tlmm_cfgs sdc2_pull_cfg[] =
+	{
+		{ SDC2_CLK_PULL_CTL_OFF,  TLMM_NO_PULL, TLMM_PULL_MASK, SDC2_HDRV_PULL_CTL },
+		{ SDC2_CMD_PULL_CTL_OFF,  TLMM_NO_PULL, TLMM_PULL_MASK, SDC2_HDRV_PULL_CTL },
+		{ SDC2_DATA_PULL_CTL_OFF, TLMM_PULL_UP, TLMM_PULL_MASK, SDC2_HDRV_PULL_CTL },
+	};
+
+	/* Set the drive strength & pull control values */
+	tlmm_set_hdrive_ctrl(sdc2_hdrv_cfg, ARRAY_SIZE(sdc2_hdrv_cfg));
+	tlmm_set_pull_ctrl(sdc2_pull_cfg, ARRAY_SIZE(sdc2_pull_cfg));
+}
+
+static struct mmc_device *dev;
+
+void *target_mmc_device()
+{
+	return (void *) dev;
+}
+
+extern void target_fat32_init(void);
+void target_sdc_init()
+{
+	struct mmc_config_data config;
+
+	/* Set drive strength & pull ctrl values */
+	set_sdc_power_ctrl();
+
+	config.slot = 2;
+	config.bus_width = DATA_BUS_WIDTH_4BIT;
+	config.max_clk_rate = MMC_CLK_200MHZ;
+	config.sdhc_base    = MSM_SDC2_SDHCI_BASE;
+	config.pwrctl_base  = MSM_SDC2_BASE;
+	config.pwr_irq      = 221; //138~1, 221~2
+	config.hs400_support = 0;
+	config.hs200_support = 0;
+	config.use_io_switch = 0;
+
+	rpm_smd_init();
+	mdelay(10);
+	regulator_enable(1<<(13-1));
+	mdelay(10);
+	if (!(dev = mmc_init(&config))) {
+		dprintf(CRITICAL, "mmc init failed!");
+		//ASSERT(0);
+	}
+}
+
+void target_sdc_uninit(void) {
+	regulator_disable(1<<(13-1));
+	mdelay(10);
+	rpm_smd_uninit();
+	mdelay(10);
+}
+#endif
 crypto_engine_type board_ce_type(void)
 {
 	return CRYPTO_ENGINE_TYPE_HW;

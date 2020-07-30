@@ -1367,6 +1367,24 @@ int update_device_tree(void *fdt, const char *cmdline,
 		}
 	}
 
+#if 1 //carl, check if want to work as usb host mode by gpio
+    offset = fdt_path_offset(fdt, "/soc/usb@78d9000");
+    if (offset > 0) {
+        int len = 0;
+        const uint32_t *msg_otg = (const uint32_t *)fdt_getprop(fdt, offset, "qcom,hsusb-otg-gpio-mode", &len);
+
+        //dprintf(ALWAYS, "msg_otg=%p, len=%d\n", msg_otg, len);
+        if (msg_otg != NULL && len == 8) {
+            gpio_tlmm_config(fdt32_to_cpu(msg_otg[0]), 0, 0, 0, 0, 0);
+            dprintf(ALWAYS, "gpio=%d, host=%d, value=%d\n", fdt32_to_cpu(msg_otg[0]), fdt32_to_cpu(msg_otg[1]), gpio_get_state(fdt32_to_cpu(msg_otg[0])));
+            if (gpio_get_state(fdt32_to_cpu(msg_otg[0])) == fdt32_to_cpu(msg_otg[1])) {
+                fdt_setprop_u32(fdt, offset, "qcom,hsusb-otg-default-mode", 2); //host mode
+                fdt_setprop_u32(fdt, offset, "qcom,hsusb-otg-mode", 2); //host mode
+            }
+        }
+    }
+#endif
+
 	fdt_pack(fdt);
 
 #if ENABLE_PARTIAL_GOODS_SUPPORT

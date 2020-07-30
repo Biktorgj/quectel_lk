@@ -38,6 +38,13 @@
 #define BOOTSELECT_FORMAT    (1 << 31)
 #define BOOTSELECT_FACTORY   (1 << 30)
 
+//quectel add
+#define QUECTEL_FOTA
+#ifdef QUECTEL_FOTA
+#define QUECTEL_FOTA_RETRY_TIMES 5
+#endif
+
+
 /* bootselect partition format structure */
 struct boot_selection_info {
 	uint32_t signature;                // Contains value BOOTSELECT_SIGNATURE defined above
@@ -51,6 +58,12 @@ struct recovery_message {
 	char command[32];
 	char status[32];
 	char recovery[1024];
+#ifdef QUECTEL_FOTA
+	int fota_Retry_times;
+	int updateBackupStage;
+// flag record update backup Stage. 0: not updating;  1: update system ubi partition;  2: update modem ubi partition 3: update recovery image
+#endif
+
 };
 
 

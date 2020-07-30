@@ -130,7 +130,7 @@ uint32_t mmc_write(uint64_t data_addr, uint32_t data_len, void *in)
 	 */
 	arch_clean_invalidate_cache_range((addr_t)in, data_len);
 
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		/* TODO: This function is aware of max data that can be
 		 * tranferred using sdhci adma mode, need to have a cleaner
@@ -197,7 +197,7 @@ uint32_t mmc_read(uint64_t data_addr, uint32_t *out, uint32_t data_len)
          */
 	arch_clean_invalidate_cache_range((addr_t)(out), data_len);
 
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		/* TODO: This function is aware of max data that can be
 		 * tranferred using sdhci adma mode, need to have a cleaner
@@ -248,7 +248,7 @@ uint32_t mmc_get_eraseunit_size()
 {
 	uint32_t erase_unit_sz = 0;
 
-	if (platform_boot_dev_isemmc()) {
+	if (target_mmc_device()) {
 		struct mmc_device *dev;
 		struct mmc_card *card;
 
@@ -344,7 +344,7 @@ uint32_t mmc_erase_card(uint64_t addr, uint64_t len)
 	ASSERT(!(addr % block_size));
 	ASSERT(!(len % block_size));
 
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		erase_unit_sz = mmc_get_eraseunit_size();
 		dprintf(SPEW, "erase_unit_sz:0x%x\n", erase_unit_sz);
@@ -424,7 +424,7 @@ uint32_t mmc_erase_card(uint64_t addr, uint64_t len)
  */
 uint32_t mmc_get_psn(void)
 {
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		struct mmc_card *card;
 
@@ -450,7 +450,7 @@ uint32_t mmc_get_psn(void)
  */
 uint64_t mmc_get_device_capacity()
 {
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		struct mmc_card *card;
 
@@ -476,7 +476,7 @@ uint64_t mmc_get_device_capacity()
  */
 uint32_t mmc_get_device_blocksize()
 {
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		struct mmc_card *card;
 
@@ -502,7 +502,7 @@ uint32_t mmc_get_device_blocksize()
  */
 uint32_t mmc_page_size()
 {
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		return BOARD_KERNEL_PAGESIZE;
 	}
@@ -527,7 +527,7 @@ void mmc_device_sleep()
 	void *dev;
 	dev = target_mmc_device();
 
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		mmc_put_card_to_sleep((struct mmc_device *)dev);
 	}
@@ -545,7 +545,7 @@ int ufs_get_boot_lun()
 	void *dev;
 	dev = target_mmc_device();
 
-	if (!(platform_boot_dev_isemmc()))
+	if (!(target_mmc_device()))
 		ret = dme_get_bbootlunen((struct ufs_dev *)dev);
 	return ret;
 }
@@ -563,7 +563,7 @@ int ufs_set_boot_lun(uint32_t boot_lun_id)
 	void *dev;
 	dev = target_mmc_device();
 
-	if (!(platform_boot_dev_isemmc()))
+	if (!(target_mmc_device()))
 		ret = dme_set_bbootlunen((struct ufs_dev *)dev, boot_lun_id);
 	return ret;
 }
@@ -578,7 +578,7 @@ void mmc_set_lun(uint8_t lun)
 	void *dev;
 	dev = target_mmc_device();
 
-	if (!platform_boot_dev_isemmc())
+	if (!target_mmc_device())
 	{
 		((struct ufs_dev*)dev)->current_lun = lun;
 	}
@@ -596,7 +596,7 @@ uint8_t mmc_get_lun(void)
 
 	dev = target_mmc_device();
 
-	if (!platform_boot_dev_isemmc())
+	if (!target_mmc_device())
 	{
 		lun = ((struct ufs_dev*)dev)->current_lun;
 	}
@@ -612,7 +612,7 @@ void mmc_read_partition_table(uint8_t arg)
 
 	dev = target_mmc_device();
 
-	if(!platform_boot_dev_isemmc())
+	if(!target_mmc_device())
 	{
 		max_luns = ufs_get_num_of_luns((struct ufs_dev*)dev);
 
@@ -653,7 +653,7 @@ uint32_t mmc_write_protect(const char *ptn_name, int set_clr)
 	dev = target_mmc_device();
 	block_size = mmc_get_device_blocksize();
 
-	if (platform_boot_dev_isemmc())
+	if (target_mmc_device())
 	{
 		card = &((struct mmc_device *)dev)->card;
 

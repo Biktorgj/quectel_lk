@@ -36,6 +36,9 @@
 
 #include "dmov.h"
 
+
+#define QUECTEL_NAND_NM14FSK2LAXCL //Ramos.zhang 20160108
+
 #define VERBOSE 0
 #define VERIFY_WRITE 0
 
@@ -133,6 +136,12 @@ struct flash_identification {
 static struct flash_identification supported_flash[] = {
 	/* Flash ID     ID Mask Density(MB)  Wid Pgsz   Blksz   oobsz onenand   Manuf */
 	{0x00000000, 0xFFFFFFFF, 0, 0, 0, 0, 0, 0}, /*ONFI*/ {0x1500aaec, 0xFF00FFFF, (256 << 20), 0, 2048, (2048 << 6), 64, 0},	/*Sams */
+#ifdef QUECTEL_NAND_FM6BD4G2GXA //Ramos.zhang 20151204
+	{0x2690ac2c, 0xFFFFFFFF, (512<<20), 0, 4096, (4096<<6), 224, 0},
+#endif
+#ifdef QUECTEL_NAND_NM14FSK2LAXCL //Ramos.zhang 20160108
+	{0x2690ac98, 0xFFFFFFFF, (512<<20), 0, 4096, (4096<<6), 256, 0},
+#endif
 	{0x5500baec, 0xFF00FFFF, (256 << 20), 1, 2048, (2048 << 6), 64, 0},	/*Sams */
 	{0x1500aa98, 0xFFFFFFFF, (256 << 20), 0, 2048, (2048 << 6), 64, 0},	/*Tosh */
 	{0x5500ba98, 0xFFFFFFFF, (256 << 20), 1, 2048, (2048 << 6), 64, 0},	/*Tosh */

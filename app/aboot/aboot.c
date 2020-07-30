@@ -2,7 +2,7 @@
  * Copyright (c) 2009, Google Inc.
  * All rights reserved.
  *
- * Copyright (c) 2009-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2015, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -89,6 +89,12 @@
 #include "scm.h"
 #include "mdtp.h"
 #include "fastboot_test.h"
+#include "qpic_nand.h"
+#include "fotainfo.h"
+
+
+#define QUECTEL_ALL_RESTORE // quectel add
+
 
 extern  bool target_use_signed_kernel(void);
 extern void platform_uninit(void);
@@ -162,6 +168,12 @@ static const char *baseband_dsda2   = " androidboot.baseband=dsda2";
 static const char *baseband_sglte2  = " androidboot.baseband=sglte2";
 static const char *warmboot_cmdline = " qpnp-power-on.warm_boot=1";
 
+//add by len[for quectel cmdline] 2018-1-18
+#ifndef QUECTEL_FLASH_SUPPORT_1G
+static char *quectel_cmdline = " recovery=0";
+#endif
+//add end
+
 static unsigned page_size = 0;
 static unsigned page_mask = 0;
 static char ffbm_mode_string[FFBM_MODE_BUF_SIZE];
@@ -222,6 +234,774 @@ extern int emmc_recovery_init(void);
 extern int fastboot_trigger(void);
 #endif
 
+#define	QUECTEL_FASTBOOT	1  // quectel deine
+static char temp_buf[4096];  // quectel add
+
+#if QUECTEL_FASTBOOT
+/* author:	ramos
+ * date:	2017/02/28
+ * purpose:	fastboot enter flag set , clean and get
+ */
+
+static const int MISC_FASTBOOT_COMMAND_BLOCK=1; //1block
+
+struct fastboot_message {
+	char command[32];
+	char status[32];
+};
+
+int set_fastboot_message(const struct fastboot_message *in)
+{
+	struct ptentry *ptn;
+	struct ptable *ptable;
+	unsigned offset = 0;
+	unsigned pagesize = flash_page_size();
+	uint32_t blocksize = flash_block_size();
+//	char buffer[4096];
+
+	ptable = flash_get_ptable();
+
+	if (ptable == NULL) {
+		dprintf(CRITICAL, "ERROR: Partition table not found\n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "misc");
+
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "ERROR: No misc partition found\n");
+		return -1;
+	}
+
+	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // Ϣڵһblockĵһpage
+	memset((void *)temp_buf,0,pagesize);
+	memcpy((void *) temp_buf, in, sizeof(*in));
+	dprintf(CRITICAL, "[Ramos] set fastboot message start !!!\n");
+	if (Quectel_flash_write(ptn,offset, 0, temp_buf, sizeof(temp_buf))) 
+	{
+		dprintf(CRITICAL, "ERROR: FASTBOOT flash write fail!\n");
+		return -1;
+	}
+	dprintf(CRITICAL, "[Ramos] set fastboot message end !!!\n");
+	return 0;
+}
+
+int get_fastboot_message(const struct fastboot_message *out)
+{
+	struct ptentry *ptn;
+	struct ptable *ptable;
+	unsigned offset = 0;
+	unsigned pagesize = flash_page_size();
+	uint32_t blocksize = flash_block_size();
+//	char buffer[4096];
+
+	ptable = flash_get_ptable();
+
+	if (ptable == NULL) {
+		dprintf(CRITICAL, "ERROR: Partition table not found\n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "misc");
+
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "ERROR: No misc partition found\n");
+		return -1;
+	}
+
+	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // Ϣڵһblockĵһpage
+	memset((void *)temp_buf,0,pagesize);
+	dprintf(CRITICAL, "[Ramos] get fastboot message start !!!\n");
+	if (flash_read(ptn,offset,temp_buf, sizeof(temp_buf))) 
+	{
+		dprintf(CRITICAL, "ERROR: FASTBOOT flash write fail!\n");
+		return -1;
+	}
+	dprintf(CRITICAL, "[Ramos] get fastboot message end !!!\n");
+	memcpy(out, temp_buf, sizeof(*out));
+	return 0;
+}
+
+int quectel_fastboot_force_entry_flag_set(void)
+{
+	struct fastboot_message msg;
+
+	strlcpy(msg.command, "boot_fastboot", sizeof(msg.command));	
+	strlcpy(msg.status, "force", sizeof(msg.status));
+	if(0 != set_fastboot_message(&msg))
+	{
+		return -1;
+	}	
+	return 0 ;
+}
+int quectel_fastboot_force_entry_flag_clean(void)
+{
+	struct fastboot_message msg;
+
+    memset(&msg, 0, sizeof(msg));
+	if(0 != set_fastboot_message(&msg))
+	{
+		return -1;
+	}
+	return 0 ;
+}
+
+int quectel_is_fastboot_entry_force(void)
+{
+	struct fastboot_message msg;
+
+	if(0 == get_fastboot_message(&msg))
+	{
+		if((!strcmp(msg.command, "boot_fastboot")) && (!strcmp(msg.status, "force")))
+		{
+			return 1;
+		}
+		else
+		{
+			return 0;
+		}
+	}
+	else
+	{
+		return 0;
+	}
+	return 0;
+}
+#endif
+
+
+#if 1 //  QUECTEL_SYSTEM_BACKUP modem backup  use a individual partition for modem restore.
+
+#define DATA_CACHE_LEN          (4200) // page 4096
+#define CEFS_FILE_MAGIC1        (0x51D24368)
+#define CEFS_FILE_MAGIC2        (0x4378AC6E)
+
+#define QUEC_BACKUP_MAGIC1        (0x78E5D4C2)
+#define QUEC_BACKUP_MAGIC2        (0x54F7D60E)
+#define QUEC_BACKUP_INFO_BLOCK_NUMS (3)  // the 3 block used for save restore flag 
+//the "sys_rev" partition last CEFS_BACKUP_INFO_BLOCK_NUMS blocks for save restroe flag
+#ifdef QUECTEL_ALL_RESTORE
+#define QUEC_ALL_RESTORE_FLAG_BLOCK_INDEX (6) // the 3 block reserved for All parition restoring flag
+//the "sys_rev" partition last QUEC_ALL_RESTORE_FLAG_BLOCK_INDEX to CEFS_BACKUP_INFO_BLOCK_NUMS reserved for this flag store.
+#endif
+
+#define BACKUP_SYSTEM_SIZE  (50*1024*1024)
+#define BACKUP_EFS2_SIZE (3*1024*1024) // 3M for cefs backup is enough
+#define BACKUP_MODEM_SIZE (50*1024*1024)//  modem ubi backup 50M, 
+#define BACKUP_RECOVERYFS_SIZE (13*1024*1024)
+#define BACKUP_IMAGE_SIZE (8*1024*1024) // boot img backup size
+static char temp_buf[4096];
+#define BACKUP_INFO_BLOCK_NUMS (3)
+
+typedef enum
+{
+	QUECTEL_RESTOREFLAG_NONE = 0,
+	QUECTEL_RESTOREFLAG_LINUXFS,
+	QUECTEL_RESTOREFLAG_CEFS,
+	QUECTEL_RESTOREFLAG_MODEM,
+	QUECTEL_RESTOREFLAG_IMAGE,
+	QUECTEL_RESTOREFLAG_RECOVERYFS,
+#ifdef QUECTEL_ALL_RESTORE
+	QUECTEL_ALL_RESTORE_BEGIN,
+#endif
+
+} quectel_RestoreFlg_type;
+
+typedef struct 
+{
+  uint32 magic1;  
+  uint32 magic2;
+  uint32 page_count;
+  uint32 data_crc;
+  
+  uint32 reserve1;  
+  uint32 reserve2;
+  uint32 reserve3;
+  uint32 reserve4;
+} quec_cefs_file_header_type;
+
+typedef struct
+{
+  uint32_t magic1;  
+  uint32_t magic2;
+
+  uint32_t cefs_restore_flag;
+  uint32_t cefs_restore_times;
+  uint32_t cefs_backup_times;
+  uint32_t cefs_crash[10];  // cefs crash where
+   
+  // Ramos add for linux fs backup restore times
+    uint32_t linuxfs_restore_flag;
+    int32_t linuxfs_restore_times;
+    uint32_t linuxfs_backup_times;
+    uint32_t linuxfs_crash[10];  //  linux fs crash where
+    
+    // modem backup restore flag
+    uint32_t modem_restore_flag;
+    uint32_t modem_restore_times;
+    uint32_t modem_backup_times;
+    uint32_t modem_crash[10];  // modem crash where
+
+    //  recovery restore flag
+    uint32_t recovery_restore_flag;
+    uint32_t recovery_restore_times;
+    uint32_t recovery_backup_times;
+    uint32_t recovery_crash[10]; 
+
+    // other image restore flag
+    uint32_t image_restoring_flag;
+    uint32_t reserved1;
+    uint32_t reserved2;
+    
+} quec_backup_info_type;
+extern uint32 Q_crc_32_calc(  uint8  *buf_ptr,  uint16  len,  uint32  seed);
+quec_backup_info_type g_QuecBackupInfo = {0};
+
+#ifdef QUECTEL_ALL_RESTORE
+uint32_t g_AllRestoring_flag =0 ;
+quectel_RestoreFlg_type g_Restore_stage = QUECTEL_RESTOREFLAG_NONE;
+
+typedef struct
+{
+	uint32_t All_Restoring_flag;
+	uint32_t fota_upgradedFlag;  // module have upgraded fota flag 1: haved done fota , 2: done fota and need to update recovery img partition.
+	uint32_t fota_updateRecoveryImgFlag;// after fota, we need update recovery img.
+} quec_All_RestoringInfo;
+
+//this function set flag, which record the module is in All(system,modem,boot) restore stage 
+int Ql_Set_AllRestoring_Flag(int flag)
+{
+	struct ptentry *ptn;
+	struct ptable *ptable;
+	uint32_t offset = 0;
+	uint32_t pagesize = flash_page_size();
+	uint32_t blocksize = flash_block_size();
+	quec_All_RestoringInfo AllRestoringflag;
+
+	ptable = flash_get_ptable();
+	if (ptable == NULL) {
+		dprintf(CRITICAL, "@Ramos ERROR: Ql_Set_AllRestoring_Flag Partition table not found\n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "sys_rev");
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "@Ramos ERROR: Ql_Set_AllRestoring_Flag No misc partition found\n");
+		return -1;
+	}
+
+	memset((void *)temp_buf , 0x00, pagesize);
+	memset((void *)&AllRestoringflag,0x00, sizeof(AllRestoringflag));
+	AllRestoringflag.All_Restoring_flag =flag ; //set all partition restoring flag.
+	memcpy(temp_buf,&AllRestoringflag,sizeof(AllRestoringflag));
+	
+	// the offset if the "sys_rev" partition last QUEC_ALL_RESTORE_FLAG_BLOCK_INDEX
+	offset = (ptn->length - QUEC_ALL_RESTORE_FLAG_BLOCK_INDEX)*blocksize;
+	if(Quectel_flash_write(ptn,offset, 0, temp_buf, pagesize))
+	{
+		dprintf(CRITICAL, "@Ramos ERROR: set all partition restoring flag fail!\n");
+		return -1;
+	}
+	g_AllRestoring_flag =flag;
+	dprintf(CRITICAL, "@Ramos set AllRestoringFlag=%d \n",flag);
+	if( 0 == flag)
+	{
+		/*0 == flag, clear the AllRestoring flag, 
+AllRestore success, we reboot the system */
+		mdelay(1000);
+		reboot_device(0);
+	}
+
+	return 0;
+}
+
+
+//this function, check if the module is in all restore stage, even if the power is shutdown, and power on.
+/* error return -1 */
+/* clean return 0  */
+/* set   return 1  */
+int Ql_check_AllRestoring_Flag()
+{
+	struct ptentry *ptn;
+	struct ptable *ptable;
+	uint32_t offset = 0;
+	uint32_t pagesize = flash_page_size();
+	uint32_t blocksize = flash_block_size();
+	quec_All_RestoringInfo AllRestoringflag;
+
+	ptable = flash_get_ptable();
+	if (ptable == NULL) {
+		dprintf(CRITICAL, "@Ramos ERROR: Ql_Set_AllRestoring_Flag Partition table not found\n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "sys_rev");
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "@Ramos ERROR: Ql_Set_AllRestoring_Flag No misc partition found\n");
+		return -1;
+	}
+
+	offset = (ptn->length - QUEC_ALL_RESTORE_FLAG_BLOCK_INDEX)*blocksize;  // offset, read restore information flag 
+	memset((void *)temp_buf , 0x00, pagesize);
+	if (Quectel_flash_nand_read(ptn, 0,offset, (void *) temp_buf, pagesize)) 
+	{
+		dprintf(CRITICAL, "@Ramos ERROR: Cannot read AllRestoring Flag!! read failed\n");
+		return -1;
+	}
+
+	memset((void *)&AllRestoringflag,0x00,sizeof(AllRestoringflag));
+	memcpy(&AllRestoringflag,temp_buf,sizeof(AllRestoringflag));
+	
+	dprintf(CRITICAL, "@Ramos check AllRestoring flag =%d,fota_updateRecoveryImgFlag=%d\n",\
+		AllRestoringflag.All_Restoring_flag,AllRestoringflag.fota_updateRecoveryImgFlag);
+	if( 1 == AllRestoringflag.fota_updateRecoveryImgFlag )
+	{
+	
+		dprintf(CRITICAL,"@Ramos update recovery img\n");
+		Ql_Restore_partition("boot", "recovery");
+		AllRestoringflag.fota_updateRecoveryImgFlag = 0;
+		// clear the recovery img update flag
+		memcpy(temp_buf,&AllRestoringflag,sizeof(AllRestoringflag));
+		offset = (ptn->length - QUEC_ALL_RESTORE_FLAG_BLOCK_INDEX)*blocksize; // offset ,write restore information 
+		if (Quectel_flash_write(ptn,offset, 0, temp_buf, pagesize))
+		{
+			dprintf(CRITICAL, "@Ramos clear update recovery img flag flash write fail!\n");
+			return -1;
+		}
+	}
+	g_AllRestoring_flag = AllRestoringflag.All_Restoring_flag;
+	if( 1 == AllRestoringflag.All_Restoring_flag)
+	{
+		return 1;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+
+// this functino, set the system ,modem ,boot,recoveryfs restore flag in bootloader
+int Ql_Set_Restore_Flags(uint32_t systemFlag,uint32_t modemFlag,uint32_t bootFlag,uint32_t recoveryfsFlag)
+{
+	struct ptentry *ptn;
+	struct ptable *ptable;
+	uint32_t offset = 0;
+	uint32_t pagesize = flash_page_size();
+	uint32_t blocksize = flash_block_size();
+	quec_backup_info_type QuecBackupInfo;
+	  //  dprintf(INFO,"@Ramos Ql_Set_Restore_Flags restore flag message\r\n");
+	ptable = flash_get_ptable();
+	if (ptable == NULL) {
+		dprintf(CRITICAL, "@Ramos ERROR:Ql_Set_Restore_Flags Partition table not found\n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "sys_rev");
+
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "@Ramos ERROR:Ql_Set_Restore_Flags No misc partition found\n");
+		return -1;
+	}
+
+	offset = (ptn->length - QUEC_BACKUP_INFO_BLOCK_NUMS)*blocksize; // offset, read restore information flag 
+	memset((void *)temp_buf , 0x00, pagesize);
+	if (Quectel_flash_nand_read(ptn, 0,offset, (void *) temp_buf, pagesize)) 
+	{
+		dprintf(CRITICAL, "@Ramos ERROR:Ql_Set_Restore_Flags Cannot read Restore Flag header\n");
+		return -1;
+	}
+	memcpy(&QuecBackupInfo,temp_buf,sizeof(QuecBackupInfo));
+	if((QUEC_BACKUP_MAGIC1 != QuecBackupInfo.magic1) ||(QUEC_BACKUP_MAGIC2 != QuecBackupInfo.magic2))
+	{
+		QuecBackupInfo.magic1 = QUEC_BACKUP_MAGIC1;
+		QuecBackupInfo.magic2 = QUEC_BACKUP_MAGIC2;
+	}
+
+	QuecBackupInfo.linuxfs_restore_flag=systemFlag;
+	QuecBackupInfo.modem_restore_flag=modemFlag;
+	QuecBackupInfo.image_restoring_flag=bootFlag;
+	QuecBackupInfo.recovery_restore_flag=recoveryfsFlag;
+	
+	memcpy(temp_buf,&QuecBackupInfo,sizeof(QuecBackupInfo));
+	offset = (ptn->length - QUEC_BACKUP_INFO_BLOCK_NUMS)*blocksize; // offset ,write restore information 
+	if (Quectel_flash_write(ptn,offset, 0, temp_buf, pagesize))
+	{
+		dprintf(CRITICAL, "@Ramos ERROR: Ql_Set_Restore_Flags flash write fail!\n");
+		return -1;
+	}
+	dprintf(INFO,"Ql_Set_Restore_Flags system=%d,modem=%d images=%d, recoveryfs=%d restore flag\n",systemFlag,modemFlag,bootFlag,recoveryfsFlag);
+	mdelay(200);
+	reboot_device(0);
+	return 0;
+}
+#endif
+
+int Ql_SetRestorecountClearFlag( quectel_RestoreFlg_type flag )
+{
+	struct ptentry *ptn;
+	struct ptable *ptable;
+	uint32_t offset = 0;
+	uint32_t pagesize = flash_page_size();
+	uint32_t blocksize = flash_block_size();
+		quec_backup_info_type QuecBackupInfo;
+	  //  dprintf(INFO,"@Ramos clean restore flag message\r\n");
+	ptable = flash_get_ptable();
+	if (ptable == NULL) {
+		dprintf(CRITICAL, "@Ramos ERROR: Partition table not found\n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "sys_rev");
+
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "@Ramos ERROR: No misc partition found\n");
+		return -1;
+	}
+
+	offset = (ptn->length - QUEC_BACKUP_INFO_BLOCK_NUMS)*blocksize; // offset, read restore information flag 
+	memset((void *)temp_buf , 0x00, pagesize);
+	if (Quectel_flash_nand_read(ptn, 0,offset, (void *) temp_buf, pagesize)) 
+	{
+		dprintf(CRITICAL, "@Ramos ERROR: Cannot read Restore Flag header\n");
+		return -1;
+	}
+	memcpy(&QuecBackupInfo,temp_buf,sizeof(QuecBackupInfo));
+
+	if(QUECTEL_RESTOREFLAG_LINUXFS == flag)
+	{
+		QuecBackupInfo.linuxfs_restore_times++;
+		dprintf(INFO,"\r\n\r\n\r\nlinux system restore times=%d!!!\r\n\r\n\r\n",QuecBackupInfo.linuxfs_restore_times);
+		QuecBackupInfo.linuxfs_restore_flag=0;//erase the restore flag
+	}
+	else if(QUECTEL_RESTOREFLAG_CEFS == flag)
+	{
+		QuecBackupInfo.cefs_restore_times++;
+		dprintf(INFO,"\r\n\r\n\r\n CEFS restore times=%d!!!\r\n\r\n\r\n",QuecBackupInfo.cefs_restore_times);
+		QuecBackupInfo.cefs_restore_flag=0;//erase the restore flag
+	}
+	else if(QUECTEL_RESTOREFLAG_MODEM == flag)
+	{
+		QuecBackupInfo.modem_restore_times++;
+		dprintf(INFO,"\r\n\r\n\r\n modem restore times=%d!!!\r\n\r\n\r\n",QuecBackupInfo.modem_restore_times);
+		QuecBackupInfo.modem_restore_flag=0;//erase the restore flag
+	}
+	else if(QUECTEL_RESTOREFLAG_RECOVERYFS == flag)
+	{
+		QuecBackupInfo.recovery_restore_times++;
+		dprintf(INFO,"\r\n\r\n\r\n recovery restore times=%d!!!\r\n\r\n\r\n",QuecBackupInfo.recovery_restore_times);
+		QuecBackupInfo.recovery_restore_flag=0;//erase the restore flag
+	}
+	else if(QUECTEL_RESTOREFLAG_IMAGE == flag)
+	{
+		dprintf(INFO,"\r\n\r\n\r\n boot image restore\r\n\r\n\r\n");
+		QuecBackupInfo.image_restoring_flag=0;//erase the restore flag
+	}
+	memcpy(temp_buf,&QuecBackupInfo,sizeof(QuecBackupInfo));
+	offset = (ptn->length - QUEC_BACKUP_INFO_BLOCK_NUMS)*blocksize; // offset ,write restore information 
+	if (Quectel_flash_write(ptn,offset, 0, temp_buf, pagesize))
+	{
+		dprintf(CRITICAL, "@Ramos ERROR: flash write fail!\n");
+		return -1;
+	}
+/*
+    memset((void *)temp_buf , 0x00, pagesize);
+    if (flash_read(ptn, offset, (void *) temp_buf, pagesize)) 
+    {
+        dprintf(CRITICAL, "@Ramos ERROR: Cannot read Restore Flag header\n");
+        return -1;
+    }
+*/
+    return 0;
+}
+
+
+quectel_RestoreFlg_type Ql_check_RestoreFlag(void )
+{
+    quec_backup_info_type QuecBackupInfo;
+    struct ptentry *ptn;
+    struct ptable *ptable;
+    uint32_t offset = 0;
+    uint32_t pagesize = flash_page_size();
+    uint32_t blocksize = flash_block_size();
+        int result = 0;
+    
+    ptable = flash_get_ptable();
+    if (ptable == NULL) {
+        dprintf(CRITICAL, "@Ramos ERROR: Partition table not found\n");
+        return QUECTEL_RESTOREFLAG_NONE;
+    }
+    ptn = ptable_find(ptable, "sys_rev");
+    if (ptn == NULL) {
+        dprintf(CRITICAL, "@Ramos  ERROR: No misc partition found\n");
+        return QUECTEL_RESTOREFLAG_NONE;
+    }
+
+    offset = (ptn->length - QUEC_BACKUP_INFO_BLOCK_NUMS)*blocksize;  // offset, read restore information
+    memset((void *)temp_buf , 00, pagesize);
+    result =  Quectel_flash_nand_read(ptn, 0,offset, (void *) temp_buf, pagesize);
+    if (NANDC_RESULT_BAD_PAGE == result) 
+        {
+			/* NANDC_RESULT_BAD_PAGE == result	that means the block unsteadiness, In the Quectel_flash_nand_read function we have erased this block
+			but FAE of naya think maby the block have bitfilp also, now we write it to aviod this issue
+			*/
+			QuecBackupInfo.magic1 = CEFS_FILE_MAGIC1;
+			QuecBackupInfo.magic2 = CEFS_FILE_MAGIC2;
+			QuecBackupInfo.linuxfs_restore_flag = 0;
+			QuecBackupInfo.cefs_restore_flag = 0;
+			QuecBackupInfo.modem_restore_flag = 0;
+			QuecBackupInfo.recovery_restore_flag = 0;
+			memset((void *)temp_buf , 0xFF, pagesize);
+			memcpy(temp_buf,&QuecBackupInfo,sizeof(QuecBackupInfo));
+			Quectel_flash_write(ptn,offset, 0, temp_buf, pagesize);
+			dprintf(INFO, "@Ramos the system restore flag block error!!!!!\n");
+			// reboot system 
+			mdelay(200);
+			reboot_device(0);
+	}
+		else if(NANDC_RESULT_SUCCESS !=result)
+		{
+			dprintf(CRITICAL, "@Ramos ERROR: Cannot read Restore Flag header\n");
+			g_Restore_stage = QUECTEL_RESTOREFLAG_NONE;
+			return QUECTEL_RESTOREFLAG_NONE;
+		}
+	memcpy((void *)&QuecBackupInfo, temp_buf, sizeof(quec_backup_info_type));
+	memcpy((void *)&g_QuecBackupInfo, temp_buf, sizeof(quec_backup_info_type));
+
+	dprintf(CRITICAL, "@Ramos Ql_check_RestoreFlag:offset=%x, magic1=%x,magic2=%x,linuxfs_restoreFlag=%d, cefs_restoreFlag=%d, modem_restoreFlag=%d,recoveryfs_restoreFlag=%d image_restoring_flag=%d \n", \
+		offset,QuecBackupInfo.magic1,QuecBackupInfo.magic2,QuecBackupInfo.linuxfs_restore_flag,QuecBackupInfo.cefs_restore_flag,QuecBackupInfo.modem_restore_flag, QuecBackupInfo.recovery_restore_flag,QuecBackupInfo.image_restoring_flag );
+	dprintf(CRITICAL, "@Ramos linuxfs_restore_times=%d, cefs_restore_times=%d, modem_restore_times=%d\n", \
+		QuecBackupInfo.linuxfs_restore_times,QuecBackupInfo.cefs_restore_times,QuecBackupInfo.modem_restore_times);
+
+	if((QUEC_BACKUP_MAGIC1 != QuecBackupInfo.magic1) ||(QUEC_BACKUP_MAGIC2 != QuecBackupInfo.magic2))
+	{
+		g_Restore_stage = QUECTEL_RESTOREFLAG_NONE;
+		return QUECTEL_RESTOREFLAG_NONE;
+	}
+
+#ifdef QUECTEL_ALL_RESTORE
+	if( (1 == QuecBackupInfo.linuxfs_restore_flag) && (1 == QuecBackupInfo.image_restoring_flag) && (1 == QuecBackupInfo.modem_restore_flag))
+	{
+		g_Restore_stage = QUECTEL_ALL_RESTORE_BEGIN;
+		return QUECTEL_ALL_RESTORE_BEGIN;
+	}
+#endif
+
+	if(1 == QuecBackupInfo.linuxfs_restore_flag)
+	{
+		g_Restore_stage = QUECTEL_RESTOREFLAG_LINUXFS;
+		return QUECTEL_RESTOREFLAG_LINUXFS;
+	}
+	if(1 == QuecBackupInfo.cefs_restore_flag)
+	{
+		g_Restore_stage = QUECTEL_RESTOREFLAG_CEFS;
+		return QUECTEL_RESTOREFLAG_CEFS;
+	}
+	if(1 == QuecBackupInfo.modem_restore_flag)
+	{
+		g_Restore_stage = QUECTEL_RESTOREFLAG_MODEM;
+		return QUECTEL_RESTOREFLAG_MODEM;
+	}
+	if(1 == QuecBackupInfo.recovery_restore_flag)
+	{
+		g_Restore_stage = QUECTEL_RESTOREFLAG_RECOVERYFS;
+		return QUECTEL_RESTOREFLAG_RECOVERYFS;
+	}
+	if(1 == QuecBackupInfo.image_restoring_flag)
+	{
+		g_Restore_stage = QUECTEL_RESTOREFLAG_IMAGE;
+		return QUECTEL_RESTOREFLAG_IMAGE;
+	}
+	g_Restore_stage = QUECTEL_RESTOREFLAG_NONE;
+	return QUECTEL_RESTOREFLAG_NONE;
+}
+
+/**
+ * Author : Darren
+ * Date : 2017/8/1
+ * get_ubiimg_size -- the function can accurately get ubi 
+ * image.the flash bad block unaffect this fuction.
+ * 0 -- get ubi image size failed
+ * positive -- get ubi image size success
+ */
+static int32_t get_ubiimg_size(struct ptentry *ptn)
+{
+    uint32_t offset = 0;
+    uint32_t image_size_in_byte = 0;
+    void *pagebuf = NULL;
+    uint32_t pagesize  = flash_page_size();
+    uint32_t blocksize = flash_block_size();
+    if (ptn == NULL)
+	{
+        dprintf(INFO,"%s:invalid parameter ptn\n", __func__);
+		return 0;
+	}
+    pagebuf = malloc(pagesize);
+    ASSERT(pagebuf);
+	memset(pagebuf, 0, pagesize);
+    dprintf(INFO,"get \"%s\" partition ubi image size!\n",ptn->name);
+    do
+    {
+        flash_read(ptn, offset, pagebuf, pagesize);
+        if (!memcmp((void *)pagebuf, UBI_MAGIC, UBI_MAGIC_SIZE))
+        {
+            offset += blocksize;
+	        memset(pagebuf, 0, pagesize);
+            continue;
+        }
+        image_size_in_byte = offset;
+        break;
+    }while(1);
+    dprintf(INFO,"%s,pagesize = %d KiB blocksize = %d KiB, img_size = %d KiB\n", __func__, \
+            pagesize/1024, blocksize/1024, image_size_in_byte/1024);
+    free(pagebuf);
+    return image_size_in_byte;
+}
+
+bool  Ql_Restore_partition(const char *source_ptn, const char *dest_ptn)
+{
+    struct ptentry *ptn;
+    struct ptable *ptable;
+    unsigned extra = 0;
+    char *data = (char *)0x89000000;
+    uint32_t sz=0;
+    uint32_t  datalen=0;
+    quectel_RestoreFlg_type Restore_flag = QUECTEL_RESTOREFLAG_NONE;
+    uint32_t pagesize = flash_page_size();
+    
+    ptable = flash_get_ptable();
+    if (ptable == NULL) 
+    {
+        fastboot_fail("partition table doesn't exist");
+        return FALSE;
+    }
+   //read restroe data form the  backup  partition 
+    ptn = ptable_find(ptable, source_ptn);
+    if (ptn == NULL) 
+    {
+        dprintf(INFO, "unknown partition name (%s). Trying updatevol\n", source_ptn);    
+        return FALSE;
+    }
+
+    dprintf(INFO,"@Ramos Get backup partition:%s, size=%d\r\n", ptn->name, ptn->length);
+
+	if(!strcmp(dest_ptn, "system"))
+	{
+		//datalen = BACKUP_SYSTEM_SIZE;   // read enough vaild data form the backup partition,
+		Restore_flag = QUECTEL_RESTOREFLAG_LINUXFS;
+		datalen = get_ubiimg_size(ptn);
+		if (datalen == 0)
+			datalen = BACKUP_SYSTEM_SIZE;
+	}
+	else if(!strcmp(dest_ptn, "efs2")) // read enough vaild data form the backup partition, 
+	{
+		datalen = BACKUP_EFS2_SIZE;  
+		Restore_flag = QUECTEL_RESTOREFLAG_CEFS;
+	}
+	else if(!strcmp(dest_ptn, "modem"))// read enough vaild data form the backup partition, 
+	{
+		//datalen = BACKUP_MODEM_SIZE; 
+		Restore_flag = QUECTEL_RESTOREFLAG_MODEM;
+		datalen = get_ubiimg_size(ptn);
+		if (datalen == 0)
+			datalen = BACKUP_MODEM_SIZE;
+	}
+	else if(!strcmp(dest_ptn, "recoveryfs"))	
+	{
+		//datalen = BACKUP_RECOVERYFS_SIZE;
+		Restore_flag = QUECTEL_RESTOREFLAG_RECOVERYFS;
+		datalen = get_ubiimg_size(ptn);
+		if (datalen == 0)
+		datalen = BACKUP_RECOVERYFS_SIZE;
+		
+	}
+	else if (!strcmp(dest_ptn, "boot")) 
+	{
+		datalen = BACKUP_IMAGE_SIZE;
+		Restore_flag = QUECTEL_RESTOREFLAG_IMAGE;
+	}
+	else if (!strcmp(dest_ptn, "recovery")) // recovery update
+	{
+		datalen = BACKUP_IMAGE_SIZE;
+		Restore_flag = QUECTEL_RESTOREFLAG_NONE;
+		// fota upgrade then when system booton we update recovery img here. the flag no in quec_backup_info_type struct
+	}
+	
+	sz = datalen;
+		data = (char*)VA((addr_t)data);
+		flash_read(ptn, 0,	data, datalen );
+
+   	// find the restroe partition
+    ptn = ptable_find(ptable, dest_ptn);
+    if (ptn == NULL) 
+    {
+        dprintf(INFO, "@Ramos unknown partition name (%s).\n", dest_ptn);    
+        return FALSE;
+    }
+    dprintf(INFO,"@Ramos Restroe  partition:%s, size=%d\r\n", ptn->name, ptn->length);    
+
+    if (!strcmp(ptn->name, "boot") || !strcmp(ptn->name, "recovery")) 
+    {
+        if (memcmp((void *)data, BOOT_MAGIC, BOOT_MAGIC_SIZE)) 
+        {
+            dprintf(INFO,"@Ramos image is not a boot image");
+            return FALSE;
+        }
+    }
+            
+    if(!strcmp(dest_ptn, "efs2"))
+    {
+        // sys_rev first page is use save the cefs backup information ,header and crc value
+        quec_cefs_file_header_type BackupCefs_Info;
+        uint32_t crc = 0;
+        uint32_t i =0;
+        static char s_buff_temp[DATA_CACHE_LEN];
+        memset((void *)&BackupCefs_Info, 0x00, sizeof(quec_cefs_file_header_type));
+        memcpy((void *)&BackupCefs_Info, data, sizeof(quec_cefs_file_header_type));
+
+        if((CEFS_FILE_MAGIC1 != BackupCefs_Info.magic1) || (CEFS_FILE_MAGIC2 != BackupCefs_Info.magic2))
+        {
+            dprintf(INFO, "@Ramos efs2 restore file magic1 error !!!\r\n\r\n");
+            return FALSE;
+        }        
+        sz = (BackupCefs_Info.page_count)*pagesize;
+        data = data + pagesize;
+
+        for (i=0; i<BackupCefs_Info.page_count; i++)
+        {       
+              memset(s_buff_temp, 0xFF, sizeof(s_buff_temp));// set buff to 0xff, because modem backup cefs set it is 0xff,  or  crc check error
+              memcpy(s_buff_temp, (data+i*pagesize),pagesize);
+              crc = Q_crc_32_calc((void *)s_buff_temp, 2048*8,crc); // 2048*8 keep with modem side
+        }
+        dprintf(INFO, "@Ramos efs2 restore sz=%d, page_count=%d,file magic1=%x,crc=%x,data_crc=%x\n", sz,BackupCefs_Info.page_count,BackupCefs_Info.magic1,crc,BackupCefs_Info.data_crc);
+        if(crc != BackupCefs_Info.data_crc)
+        {
+            dprintf(INFO, "@Ramos efs2 restore file CRC check  error !!!\r\n\r\n");
+            return FALSE;
+        }
+        flash_erase(ptn);// efs partition erase all
+    }
+
+    sz = ROUND_TO_PAGE(sz, page_mask);
+    dprintf(INFO, "@Ramos writing 0x%x bytes to '%s'\n", sz, ptn->name);
+    Quectel_flash_erase(ptn,sz); // erase the partiton first
+    if (flash_write(ptn, 0, data, sz)) //this fuction not use the write restore flag
+    {
+        dprintf(INFO,"@Ramos flash write failure !!!!!\r\n\r\n\r\n");
+        return FALSE;
+    }
+
+	if(QUECTEL_RESTOREFLAG_NONE != Restore_flag)
+	{
+		//clear the restroe flag , record the restroe tiems
+		Ql_SetRestorecountClearFlag(Restore_flag);
+#ifndef QUECTEL_ALL_RESTORE// if defined QUECTEL_ALL_RESTORE, not reboot system when one parition restore success.
+			dprintf(INFO, "partition '%s' Restroe  succeed, reboot Now !!!!!\n", ptn->name);
+			   //  success ,  reboot
+			mdelay(1000);
+			reboot_device(0);
+#endif
+	}
+
+return TRUE;
+
+}
+#endif
+
 static void update_ker_tags_rdisk_addr(struct boot_img_hdr *hdr, bool is_arm64)
 {
 	/* overwrite the destination of specified for the project */
@@ -232,6 +1012,7 @@ static void update_ker_tags_rdisk_addr(struct boot_img_hdr *hdr, bool is_arm64)
 		hdr->kernel_addr = ABOOT_FORCE_KERNEL_ADDR;
 	hdr->ramdisk_addr = ABOOT_FORCE_RAMDISK_ADDR;
 	hdr->tags_addr = ABOOT_FORCE_TAGS_ADDR;
+
 #endif
 }
 
@@ -267,16 +1048,11 @@ unsigned char *update_cmdline(const char * cmdline)
 		cmdline_len = strlen(cmdline);
 		have_cmdline = 1;
 	}
-	else {
-		dprintf(CRITICAL,"cmdline is NULL\n");
-		ASSERT(0);
-	}
 	if (target_is_emmc_boot()) {
 		cmdline_len += strlen(emmc_cmdline);
 #if USE_BOOTDEV_CMDLINE
 		boot_dev_buf = (char *) malloc(sizeof(char) * BOOT_DEV_MAX_LEN);
 		ASSERT(boot_dev_buf);
-		memset((void *)boot_dev_buf, 0, sizeof(*boot_dev_buf));
 		platform_boot_dev_cmdline(boot_dev_buf);
 		cmdline_len += strlen(boot_dev_buf);
 #endif
@@ -372,6 +1148,14 @@ unsigned char *update_cmdline(const char * cmdline)
 		warm_boot = true;
 		cmdline_len += strlen(warmboot_cmdline);
 	}
+
+    // add by len for quectel_cmdline, 2018-1-18
+#ifndef QUECTEL_FLASH_SUPPORT_1G
+	if (strlen(quectel_cmdline) && boot_into_recovery ){
+        cmdline_len += strlen(quectel_cmdline);
+    }
+#endif
+	//add end
 
 	if (cmdline_len > 0) {
 		const char *src;
@@ -526,6 +1310,16 @@ unsigned char *update_cmdline(const char * cmdline)
 			while ((*dst++ = *src++));
 			free(target_boot_params);
 		}
+
+        // add by len for quectel_cmdline, 2018-1-18
+#ifndef QUECTEL_FLASH_SUPPORT_1G
+		if (strlen(quectel_cmdline) && boot_into_recovery) {
+            src = quectel_cmdline;
+            if (have_cmdline) --dst;
+            while ((*dst++ = *src++));
+        }
+#endif
+		// add end
 	}
 
 
@@ -1140,7 +1934,8 @@ int boot_linux_from_mmc(void)
 	hdr->ramdisk_addr = VA((addr_t)(hdr->ramdisk_addr));
 	hdr->tags_addr = VA((addr_t)(hdr->tags_addr));
 
-	kernel_size = ROUND_TO_PAGE(kernel_size,  page_mask);
+	
+    kernel_size = ROUND_TO_PAGE(kernel_size,  page_mask);
 	/* Check if the addresses in the header are valid. */
 	if (check_aboot_addr_range_overlap(hdr->kernel_addr, kernel_size) ||
 		check_aboot_addr_range_overlap(hdr->ramdisk_addr, ramdisk_actual))
@@ -1254,7 +2049,7 @@ int boot_linux_from_flash(void)
 	unsigned ramdisk_actual;
 	unsigned imagesize_actual;
 	unsigned second_actual = 0;
-
+	
 #if DEVICE_TREE
 	struct dt_table *table;
 	struct dt_entry dt_entry;
@@ -1264,7 +2059,6 @@ int boot_linux_from_flash(void)
 	unsigned int dtb_size = 0;
 	unsigned char *best_match_dt_addr = NULL;
 #endif
-
 	if (target_is_emmc_boot()) {
 		hdr = (struct boot_img_hdr *)EMMC_BOOT_IMG_HEADER_ADDR;
 		if (memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE)) {
@@ -1355,12 +2149,6 @@ int boot_linux_from_flash(void)
 
 #if DEVICE_TREE
 		dt_actual = ROUND_TO_PAGE(hdr->dt_size, page_mask);
-
-		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual+ (uint64_t)dt_actual + page_size)) {
-			dprintf(CRITICAL, "Integer overflow detected in bootimage header fields\n");
-			return -1;
-		}
-
 		imagesize_actual = (page_size + kernel_actual + ramdisk_actual + dt_actual);
 
 		if (check_aboot_addr_range_overlap(hdr->tags_addr, hdr->dt_size))
@@ -1369,29 +2157,13 @@ int boot_linux_from_flash(void)
 			return -1;
 		}
 #else
-		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual+ page_size)) {
-			dprintf(CRITICAL, "Integer overflow detected in bootimage header fields\n");
-			return -1;
-		}
 		imagesize_actual = (page_size + kernel_actual + ramdisk_actual);
 #endif
 
-		dprintf(INFO, "Loading (%s) image (%d): start\n",
+		dprintf(INFO, "AAAAALoading (%s) image (%d): start\n",
 			(!boot_into_recovery ? "boot" : "recovery"),imagesize_actual);
 		bs_set_timestamp(BS_KERNEL_LOAD_START);
 
-		if (UINT_MAX - page_size < imagesize_actual)
-		{
-			dprintf(CRITICAL,"Integer overflow detected in bootimage header fields %u %s\n", __LINE__,__func__);
-			return -1;
-		}
-
-		/*Check the availability of RAM before reading boot image + max signature length from flash*/
-		if (target_get_max_flash_size() < (imagesize_actual + page_size))
-		{
-			dprintf(CRITICAL, "bootimage  size is greater than DDR can hold\n");
-			return -1;
-		}
 		/* Read image without signature */
 		if (flash_read(ptn, offset, (void *)image_addr, imagesize_actual))
 		{
@@ -1399,7 +2171,7 @@ int boot_linux_from_flash(void)
 				return -1;
 		}
 
-		dprintf(INFO, "Loading (%s) image (%d): done\n",
+		dprintf(INFO, "AAAAALoading (%s) image (%d): done\n",
 			(!boot_into_recovery ? "boot" : "recovery"), imagesize_actual);
 		bs_set_timestamp(BS_KERNEL_LOAD_DONE);
 
@@ -1458,12 +2230,12 @@ int boot_linux_from_flash(void)
 	else
 	{
 		offset = page_size;
-
-		kernel_actual = ROUND_TO_PAGE(hdr->kernel_size, page_mask);
+		
+        kernel_actual = ROUND_TO_PAGE(hdr->kernel_size, page_mask);
 		ramdisk_actual = ROUND_TO_PAGE(hdr->ramdisk_size, page_mask);
 		second_actual = ROUND_TO_PAGE(hdr->second_size, page_mask);
-
-		dprintf(INFO, "Loading (%s) image (%d): start\n",
+		
+        dprintf(INFO, "BBBBLoading (%s) image (%d): start\n",
 				(!boot_into_recovery ? "boot" : "recovery"), kernel_actual + ramdisk_actual);
 
 		bs_set_timestamp(BS_KERNEL_LOAD_START);
@@ -1490,7 +2262,7 @@ int boot_linux_from_flash(void)
 
 		offset += ramdisk_actual;
 
-		dprintf(INFO, "Loading (%s) image (%d): done\n",
+		dprintf(INFO, "BBBBBLoading (%s) image (%d): done\n",
 				(!boot_into_recovery ? "boot" : "recovery"), kernel_actual + ramdisk_actual);
 
 		bs_set_timestamp(BS_KERNEL_LOAD_DONE);
@@ -2187,7 +2959,8 @@ void cmd_erase_nand(const char *arg, void *data, unsigned sz)
 		fastboot_fail("unknown partition name");
 		return;
 	}
-
+    
+    dprintf(INFO, "@Ramos, arg(%s)erase nand partition:%s, size=%d", arg, ptn->name, ptn->length);
 	if (flash_erase(ptn)) {
 		fastboot_fail("failed to erase partition");
 		return;
@@ -2831,7 +3604,7 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 		|| !strcmp(ptn->name, "recoveryfs")
 		|| !strcmp(ptn->name, "modem"))
 		extra = 1;
-	else {
+	else{
 		rounded_size = ROUNDUP(sz, page_size);
 		bytes_to_round_page = rounded_size - sz;
 		if (bytes_to_round_page) {
@@ -2852,23 +3625,75 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 	}
 
 	dprintf(INFO, "writing %d bytes to '%s'\n", sz, ptn->name);
+#if 1 // def  QUECTEL_SYSTEM_BACKUP  
+if(!strcmp(ptn->name,"sys_back")
+	|| !strcmp(ptn->name,"tz_b")
+	|| !strcmp(ptn->name,"rpm_b")
+	|| !strcmp(ptn->name,"aboot_b")
+	|| !strcmp(ptn->name,"boot_b")
+	|| !strcmp(ptn->name,"recoveryfs_b")
+	|| !strcmp(ptn->name,"qdsp6sw_b")
+	|| !strcmp(ptn->name,"modem_b"))
+{
+	 dprintf(INFO, "flash_write 111 writing %d bytes to '%s'  extra=%d \n", sz, ptn->name,extra);
+	 extra =0 ;
+	if (flash_write(ptn, extra, data, sz)) {
+		fastboot_fail("flash write failure");
+		return;
+		}
+}
+else
+{
+#endif 	
 	if ((sz > UBI_MAGIC_SIZE) && (!memcmp((void *)data, UBI_MAGIC, UBI_MAGIC_SIZE))) {
+		
+	dprintf(INFO, "flash_ubi_img writing %d bytes to '%s'\n", sz, ptn->name);
+#if 1 // def  QUECTEL_SYSTEM_BACKUP  
+/******************************************************************************************
+Ramos-2018/04/13: 修复下载UBI 文件系统镜像时断电容易出现下次下载失败问题
+Refer to [Issue-Depot].[IS0000118][Submitter:ramos.zhang,Date:2018-04-13]
+<fastboot 下载UBI 文件系统镜像时断电，下次继续下载，容易出现下次读取给分区UBI数据异常造成无法下载。>
+******************************************************************************************/
+	 	dprintf(INFO, "UBI Image flash_write 111 writing %d bytes to '%s'  extra=%d \n", sz, ptn->name,extra);
+	 	extra =0 ;
+		if (flash_write(ptn, extra, data, sz)) {
+			fastboot_fail("flash write failure");
+			return;
+			}
+#else
 		if (flash_ubi_img(ptn, data, sz)) {
 			fastboot_fail("flash write failure");
 			return;
 		}
+#endif
 	} else {
+		
+	dprintf(INFO, "flash_write 222 writing %d bytes to '%s'  extra=%d \n", sz, ptn->name,extra);
 		if (flash_write(ptn, extra, data, sz)) {
 			fastboot_fail("flash write failure");
 			return;
 		}
 	}
+#if 1 // def  QUECTEL_SYSTEM_BACKUP  
+}
+#endif	
 	dprintf(INFO, "partition '%s' updated\n", ptn->name);
 	fastboot_okay("");
 }
 
 void cmd_flash(const char *arg, void *data, unsigned sz)
 {
+#if QUECTEL_FASTBOOT
+	if(!quectel_is_fastboot_entry_force()) // if the fastboot flag is not set, 
+	{
+		if(0 != quectel_fastboot_force_entry_flag_set())
+		{
+			dprintf(INFO,"[Ramos] set fastboot force flag \n");
+			fastboot_fail("set fastboot force flag failed");
+			return;
+		}
+	}
+#endif
 	if(target_is_emmc_boot())
 		cmd_flash_mmc(arg, data, sz);
 	else
@@ -2893,6 +3718,9 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
 void cmd_reboot(const char *arg, void *data, unsigned sz)
 {
 	dprintf(INFO, "rebooting the device\n");
+#if QUECTEL_FASTBOOT
+	quectel_fastboot_force_entry_flag_clean();	
+#endif
 	fastboot_okay("");
 	reboot_device(0);
 }
@@ -3359,9 +4187,255 @@ void aboot_fastboot_register_commands(void)
 	fastboot_publish("version-baseband", (const char *) device.radio_version);
 }
 
+#if QUECTEL_FASTBOOT
+/* author:	sam
+ * date:	2014/09/19
+ * purpose:	CTL+C key, enter the FastBoot
+ */
+int quectel_fource_boot(void)
+{
+	char ch, fh = 0;
+	int i;
+	dprintf(CRITICAL,"CTL+C key, enter the FastBoot\n");
+	for (i = 2; i != 0; --i)
+	{
+		if (!getc(&ch))
+		{
+			dprintf(CRITICAL,"%s ch: %x\n", __func__, ch);
+			if (ch == 0x03) ++fh;
+			else fh = 0;
+			if (fh >= 1) return 1;
+		}
+		mdelay(10);
+	}
+	return 0;
+}	
+#endif
+
+#if MMC_SDHCI_SUPPORT
+int quectel_f_mount(void);
+unsigned quectel_f_read(const char *fname, void *buff, unsigned size);
+void target_sdc_init(void);
+void target_sdc_uninit(void);
+
+static void quectel_cmd_flash_sd(const char *ptn, const char *file) {
+	char update_file[256];
+	unsigned f_size;
+	void *buff = target_get_scratch_address();
+	unsigned size = target_get_max_flash_size();
+
+	snprintf(update_file, sizeof(update_file), "0:\\update\\%s", file);
+	f_size = quectel_f_read(update_file, buff, size);
+	if (f_size)
+		cmd_flash_nand(ptn, buff, f_size);
+};
+
+static void quectel_sd_fastboot(void) {
+	target_sdc_init();
+	
+	if (target_mmc_device() && quectel_f_mount() == 0) {
+		quectel_cmd_flash_sd("sbl", "sbl1.mbn");
+		//quectel_cmd_flash_sd("mibib", "partition.mbn");
+		quectel_cmd_flash_sd("tz", "tz.mbn");
+		quectel_cmd_flash_sd("rpm", "rpm.mbn");
+		//quectel_cmd_flash_sd("aboot", "appsboot.mbn");
+		quectel_cmd_flash_sd("boot", "mdm9607-perf-boot.img");
+		quectel_cmd_flash_sd("modem", "NON-HLOS.ubi");
+		quectel_cmd_flash_sd("recovery", "mdm9607-perf-boot.img");
+		quectel_cmd_flash_sd("recoveryfs", "mdm-perf-recovery-image-mdm9607-perf.ubi");
+		quectel_cmd_flash_sd("sys_back", "mdm9607-perf-sysfs.ubi");	
+		quectel_cmd_flash_sd("system", "mdm9607-perf-sysfs.ubi");
+	}
+
+	target_sdc_uninit();
+}
+#endif
+
+//add by hertz.zhou 2017.02.23 
+#if 1
+#include <platform/gpio.h>
+
+#define CMD_BUFFER_LEN	64
+int cmd_buffer_cnt = 0;
+char cmd_buffer[CMD_BUFFER_LEN];
+
+struct gpio_test_s{
+	uint32_t mod_pin;
+	uint32_t bb_gpio;
+};
+
+//the table which include the pins to be tested
+struct gpio_test_s gpio_test_table[] = {
+	{1, 25},		//WAKEUP_IN
+	{2, 10},		//AP_READY
+	{3, 42},		//SLEEP_IND
+	{4, 11},		//W_DISABLE#
+	{13, 34},		//USIM_PRESENCE
+	{23, 26},		//SD1_INS_DET
+	{24, 76},		//PCM_IN
+	{25, 77},		//PCM_OUT
+	{26, 79},		//PCM_SYNC
+	{27, 78},		//PCM_CLK
+	{37, 22},		//SPI_CS
+	{38, 20},		//SPI_MOSI
+	{39, 21},		//SPI_MISO
+	{40, 23},		//SPI_CLK
+	{41, 7},		//I2C_SCL
+	{42, 6},		//I2C_SDA
+	{62, 75},		//RI
+	{63, 4},		//DCD
+	{64, 3},		//CTS
+	{65, 2},		//RTS
+	{66, 5},		//DTR
+	{67, 0},		//TXD
+	{68, 1},		//RXD
+};
+
+const int gpio_test_table_size = sizeof(gpio_test_table) / sizeof(struct gpio_test_s);
+
+int gpio_is_in_table(uint32_t gpio)
+{
+	int ret = 0;
+	int i;
+
+	for(i = 0; i < gpio_test_table_size; i++)
+	{
+		if(gpio_test_table[i].mod_pin == gpio)
+		{
+			ret = 1;
+			break;
+		}
+	}
+
+	return ret;
+}
+
+uint32_t gpio_mod_pin_mapto_bb(uint32_t mod_pin)
+{
+	int i;
+
+	for(i = 0; i < gpio_test_table_size; i++)
+	{
+		if(gpio_test_table[i].mod_pin == mod_pin)
+		{
+			return gpio_test_table[i].bb_gpio;
+		}
+	}
+
+	return 0;
+}
+/*
+ *you should input,for example ,"GPIO,23",to test if pin23 is ok
+ and if ok ,the response will be "OKIO,23"
+ * */
+void gpio_test_mode(void)
+{
+	char ch;
+	uint32_t gpio, enable, i;
+	
+	cmd_buffer_cnt = 0;
+	memset(cmd_buffer, 0, CMD_BUFFER_LEN);
+
+	while(1)
+	{
+		ch = uart_getc(0, 1);
+		putc(ch);
+
+		if(ch == 0x0a)//change line
+		{
+			continue;
+		}
+		
+		if(ch == 0x0d)//if ch is enter
+		{	
+			if(memcmp(cmd_buffer, "GPIO,", 5))//if the input start with "GPIO,"
+			{
+				printf("%s: %d\n", __func__, __LINE__);
+				goto error;
+			}
+			
+			gpio = 0;
+			enable = 0;
+			i = 5;
+			while(isdigit(cmd_buffer[i]))//get the pin number.example "GPIO,23"
+			{
+				gpio *= 10;
+				gpio += cmd_buffer[i] - '0';
+				i++;
+			}
+
+			if(gpio == 999)//exit test
+			{
+				break;
+			}
+
+			i++;
+			enable += cmd_buffer[i] - '0';
+
+			if((gpio != 0 && !gpio_is_in_table(gpio)) || (enable != 0 && enable !=1))
+			{
+				printf("%s: %d\n", __func__, __LINE__);
+				goto error;
+			}
+			
+			if(!gpio)
+			{
+				for(i = 0; i < gpio_test_table_size; i++)//test all pins in the table 
+				{
+					gpio_tlmm_config(gpio_test_table[i].bb_gpio, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA, GPIO_DISABLE);
+					dsb();
+					gpio_set_val(gpio_test_table[i].bb_gpio, enable);
+					dsb();
+				}
+			}
+			//the special pin to be test
+			else
+			{
+				gpio = gpio_mod_pin_mapto_bb(gpio);
+				gpio_tlmm_config(gpio, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA, GPIO_DISABLE);
+				dsb();
+				gpio_set_val(gpio, enable);
+				dsb();
+			}
+			
+			cmd_buffer_cnt = 0;
+			memset(cmd_buffer, 0, CMD_BUFFER_LEN);
+			printf("OK\r\n");
+			continue;
+error:
+			printf("ERROR\r\n");
+			cmd_buffer_cnt = 0;
+			memset(cmd_buffer, 0, CMD_BUFFER_LEN);
+		}
+		else
+		{
+			cmd_buffer[cmd_buffer_cnt++] = ch;
+			if(cmd_buffer_cnt == CMD_BUFFER_LEN)
+			{
+				cmd_buffer_cnt = 0;
+			}
+		}
+	}
+
+	for(i = 0; i < gpio_test_table_size; i++)
+	{
+		gpio_tlmm_config(gpio_test_table[i].bb_gpio, 0, GPIO_INPUT, GPIO_NO_PULL, GPIO_2MA, GPIO_DISABLE);
+		dsb();
+	}
+}
+#endif
+//end hertz.zhou 2017.02.23
+
+
 void aboot_init(const struct app_descriptor *app)
 {
 	unsigned reboot_mode = 0;
+	unsigned usb_init = 0;
+	unsigned sz = 0;
+	char ch;
+	int fh = 0;
+	char diag_cnt = 0;
+	int i;
 
 	/* Setup page size information for nv storage */
 	if (target_is_emmc_boot())
@@ -3406,6 +4480,160 @@ void aboot_init(const struct app_descriptor *app)
 	dprintf(SPEW,"serial number: %s\n",sn_buf);
 
 	memset(display_panel_buf, '\0', MAX_PANEL_BUF_SIZE);
+#if QUECTEL_FASTBOOT
+	/* this function use for check fastboot download,
+	if fastboot download not completely, the system must entry fastboot again for download*/
+	if(quectel_is_fastboot_entry_force())// check fastboot download flag.
+	{
+		goto fastboot;
+	}
+#endif
+	
+//add hertz.zhou 2017.02.23
+#define	QUECTEL_FASTBOOT	1
+#if QUECTEL_FASTBOOT
+	
+/*
+ * input CTRL+C,and choose PINTEST mode or fastboot mode
+ * when the test ended goto exit_pintest_mode
+ * */
+	printf("CTRL+C: enter instruction mode\n");
+#ifndef QUECTEL_FLASH_SUPPORT_1G
+	printf("RECOVERY,");
+#endif
+	printf("PINTEST OR FASTBOOT\n\n\n\n");
+
+	for (i = 10; i != 0; --i)
+	{
+		if (!getc(&ch) && ch == 0x03)
+		{
+			printf("PINTEST: test gpio(s) connectivity.\n");
+			printf("fastboot: set fastboot mode.\n");
+#ifndef QUECTEL_FLASH_SUPPORT_1G
+			printf("recovery: set recovery mode.\n");
+#endif
+			while(1)
+			{
+				ch = uart_getc(0, 1);
+				putc(ch);
+
+				if((ch >= 'A' && ch <= 'Z')
+				 ||(ch >= 'a' && ch <= 'z')
+				 || ch == 0x0d)
+				{
+					if(ch == 0x0d)
+					{
+						if(strlen("PINTEST") == cmd_buffer_cnt
+							&& !memcmp(cmd_buffer, "PINTEST", cmd_buffer_cnt))
+						{
+							printf("PIN TEST MODE\r\n", __func__);
+							gpio_test_mode();
+							goto exit_pintest_mode;
+						}
+						else if(strlen("fastboot") == cmd_buffer_cnt
+							&& !memcmp(cmd_buffer, "fastboot", cmd_buffer_cnt))
+						{
+							printf("%s: going to fastboot mode.\n", __func__);
+							goto fastboot;
+						}
+                        // add by len for manual into recovery, 2018-1-18
+#ifndef QUECTEL_FLASH_SUPPORT_1G
+						else if(strlen("recovery") == cmd_buffer_cnt
+                            && !memcmp(cmd_buffer, "recovery", cmd_buffer_cnt))
+                        {
+                            boot_into_recovery = 1;
+                            strcpy(quectel_cmdline," recovery=1");
+                            printf("%s: boot to recoveryfs.\n", __func__);
+                            goto normal_boot;
+                        }
+#endif
+						//add end
+
+					}
+					else
+					{
+						cmd_buffer[cmd_buffer_cnt++] = ch;
+						if(cmd_buffer_cnt == CMD_BUFFER_LEN)
+						{
+							cmd_buffer_cnt = 0;
+						}
+					}
+				}
+				else
+				{
+					cmd_buffer_cnt = 0;
+				}
+			}
+		}
+		
+		printf("%s char: %c\n", __func__, ch);
+		mdelay(10);
+	}
+exit_pintest_mode:
+#endif
+//end hertz.zhou 2017.02.23
+
+#if 1 //def QUECTEL_MODEM_RESTORE_UBI
+#ifdef QUECTEL_ALL_RESTORE
+	if(QUECTEL_ALL_RESTORE_BEGIN == Ql_check_RestoreFlag())
+	{
+		/*if found the module need all(system,modem,boot) resore,we set a Allrestoreing flag in other block .
+		 and we clean this flag after all partitin restore completely. this flag is usred for all(system,modem,boot) partitino
+		 restore is independent. 
+		*/
+		Ql_Set_AllRestoring_Flag(1); //set flag
+	}
+	else
+	{
+		if((1 == Ql_check_AllRestoring_Flag()) && (QUECTEL_RESTOREFLAG_NONE == g_Restore_stage))
+		{
+			/* if the AllRestoeing flag is not clean, but the restores flag is empty.
+				that means the restores flag is lost by sometimes. maybe is lost when system(modme) restore ok, 
+				and clean the system(modem) restore flag, but the power is shutdown, this case restores flags lost.
+				So maybe the system( or modem or boot) are not restored, and we don't know which oen is. 
+				So we need set the all	restore flags in here !!!!!!!				*/
+
+			Ql_Set_Restore_Flags(1,1,1,1);
+
+		}
+	}
+#endif
+	if(1 == g_QuecBackupInfo.linuxfs_restore_flag)// linux rootfs restore
+	{
+		dprintf(CRITICAL,"@Ramos Restore the linux FS  start  now\n");
+		Ql_Restore_partition("sys_back", "system");
+	}
+	if(1 == g_QuecBackupInfo.cefs_restore_flag)  // modem cefs restore
+	{
+		dprintf(CRITICAL,"@Ramos Restore the CEFS start  now\n");
+		Ql_Restore_partition("sys_rev", "efs2");
+	}
+
+	if(1 == g_QuecBackupInfo.modem_restore_flag)// modem ubi restore
+	{
+		dprintf(CRITICAL,"@Ramos Restore the modem start  now\n");
+		Ql_Restore_partition("qdsp6sw_b", "modem");
+	}
+	if(1 == g_QuecBackupInfo.recovery_restore_flag)
+	{
+		dprintf(CRITICAL,"@Darren Restore the recovery FS  start  now\n");
+		Ql_Restore_partition("recoveryfs_b", "recoveryfs");
+	}
+	if(1 == g_QuecBackupInfo.image_restoring_flag)
+	{
+		dprintf(CRITICAL,"@Darren Restore the boot image start  now\n");
+		Ql_Restore_partition("recovery", "boot");	
+	}
+
+	#ifdef QUECTEL_ALL_RESTORE
+	if(1 == g_AllRestoring_flag)
+	{
+		/* all(system,modem,boot) restore completely, clean the AllRestoreing Flag */
+		Ql_Set_AllRestoring_Flag(0); //clean flag
+	}
+	#endif
+
+#endif
 
 	/*
 	 * Check power off reason if user force reset,
@@ -3449,7 +4677,7 @@ void aboot_init(const struct app_descriptor *app)
 #endif
 	if (reboot_mode == RECOVERY_MODE)
 	{
-		boot_into_recovery = 1;
+        boot_into_recovery = 1;
 	}
 	else if(reboot_mode == FASTBOOT_MODE)
 	{
@@ -3460,6 +4688,9 @@ void aboot_init(const struct app_descriptor *app)
 		boot_reason_alarm = true;
 	}
 
+#if MMC_SDHCI_SUPPORT
+	quectel_sd_fastboot();
+#endif
 normal_boot:
 	if (!boot_into_fastboot)
 	{
@@ -3485,6 +4716,7 @@ normal_boot:
 		else
 		{
 			recovery_init();
+			fota_info_check();
 	#if USE_PCOM_SECBOOT
 		if((device.is_unlocked) || (device.is_tampered))
 			set_tamper_flag(device.is_tampered);
@@ -3494,7 +4726,13 @@ normal_boot:
 		dprintf(CRITICAL, "ERROR: Could not do normal boot. Reverting "
 			"to fastboot mode.\n");
 	}
-
+#if QUECTEL_FASTBOOT
+/* author:	sam
+ * date:	2014/09/19
+ * purpose:	CTL+C key, enter the FastBoot
+ */
+fastboot:
+#endif
 	/* We are here means regular boot did not happen. Start fastboot. */
 
 	/* register aboot specific fastboot commands */

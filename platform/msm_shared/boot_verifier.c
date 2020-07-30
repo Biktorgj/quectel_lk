@@ -95,14 +95,14 @@ IMPLEMENT_ASN1_FUNCTIONS(KEYSTORE_INNER)
 	} ASN1_SEQUENCE_END(KEYSTORE)
 IMPLEMENT_ASN1_FUNCTIONS(KEYSTORE)
 
-static uint32_t read_der_message_length(unsigned char* input, unsigned sz)
+static uint32_t read_der_message_length(unsigned char* input)
 {
 	uint32_t len = 0;
-	uint32_t pos = 0;
+	int pos = 0;
 	uint8_t len_bytes = 1;
 
 	/* Check if input starts with Sequence id (0X30) */
-	if(sz < 3 || input[pos] != 0x30)
+	if(input[pos] != 0x30)
 		return len;
 	pos++;
 
@@ -131,7 +131,7 @@ static uint32_t read_der_message_length(unsigned char* input, unsigned sz)
 		}
 
 		/* Read next octet */
-		if (pos < (uint32_t) ASN1_SIGNATURE_BUFFER_SZ && pos < sz)
+		if (pos < (int) ASN1_SIGNATURE_BUFFER_SZ)
 			len = len | input[pos];
 		else
 		{

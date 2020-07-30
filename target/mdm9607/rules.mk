@@ -51,3 +51,8 @@ OBJS += \
 	$(LOCAL_DIR)/init.o \
 	$(LOCAL_DIR)/meminfo.o \
 	$(LOCAL_DIR)/keypad.o
+
+ifeq ($(ENABLE_SDHCI_SUPPORT),1)
+	MODULES += lib/fs/ff12b
+	OBJS += $(LOCAL_DIR)/regulator.o
+endif

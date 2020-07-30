@@ -986,7 +986,8 @@ void sdhci_init(struct sdhci_host *host)
 	sdhci_set_bus_power_on(host);
 
 	/* Wait for power interrupt to be handled */
-	event_wait(host->sdhc_event);
+	//event_wait(host->sdhc_event);
+	event_wait_timeout(host->sdhc_event, 50);
 
 	/* Set bus width */
 	sdhci_set_bus_width(host, SDHCI_BUS_WITDH_1BIT);

@@ -531,6 +531,9 @@ ifeq ($(PLATFORM),mdm9607)
 			$(LOCAL_DIR)/flash-ubi.o \
 			$(LOCAL_DIR)/scm.o \
 			$(LOCAL_DIR)/dev_tree.o
+ifeq ($(ENABLE_SDHCI_SUPPORT),1)
+	OBJS += $(LOCAL_DIR)/gpio.o
+endif
 endif
 
 ifeq ($(PLATFORM),msm8996)

@@ -66,20 +66,40 @@ static struct bam_instance bam;
 static uint8_t *bbtbl;
 
 static uint8_t* rdwr_buf;
-
 static struct flash_id supported_flash[] = {
-	/* Flash ID  Flash ID2 ID Mask     ID Mask2  Density(MB)    Wid Pgsz    Blksz              oobsz   8-bit ECCf */
+	/*       Flash ID  Flash ID2     ID Mask  ID Mask2  Density(MB)    Wid Pgsz    Blksz              oobsz   8-bit ECCf */
+  /*bik*/	{0x1590aaad, 0x46, 0xFFFFFFFF, 0xFF,      0x10000000,    0,  2048,   0x00020000,        0x80,   0},
+
+#if 1 //QUECTEL_NAND_MT29AZ5A3CHHWD
+    {0x1590AC2C, 0x56,     0xFFFFFFFF, 0XFF,     0x20000000,    0,  2048,   0x00020000,        0x40,   0},
+
+#else
 	{0x1590AC2C, 0x56,     0xFFFFFFFF, 0xFF,     0x20000000,    0,  2048,   0x00020000,        0x40,   0},
+#endif
+
+#if 1 //quectel define jsfc 4G flash
+	{0x1590ac01, 0x56,     0xFFFFFFFF, 0XFF,     (512<<20),     0,  2048,   (2048<<6),         128,    1},
+#endif
 	{0x1590AC2C, 0x57,     0xFFFFFFFF, 0xFF,     0x20000000,    0,  2048,   0x00020000,        0x40,   1},
 	{0x1590AA2C, 0x06,     0xFFFFFFFF, 0x0,      0x10000000,    0,  2048,   0x00020000,        0xE0,   0},
+#if 1 //QUECTEL_NAND_FM6BD4G2GXA  quectel define ESMT flash
 	{0x2690AC2C, 0x54,     0xFFFFFFFF, 0x0,      0x20000000,    0,  4096,   0x00040000,        0xE0,   1},
+#else
+	{0x2690AC2C, 0x54,     0xFFFFFFFF, 0x0,      0x20000000,    0,  4096,   0x00040000,        0xE0,   1},
+#endif
 	{0x1590ACAD, 0,        0xFFFFFFFF, 0x0,      0x20000000,    0,  2048,   0x00020000,        0x80,   0},
 	{0x9590DC2C, 0x56,     0xFFFFFFFF, 0x0,      0x10000000,    0,  2048,   0x00020000,        0x40,   0},
 	{0x1590aa98, 0x76,     0xFFFFFFFF, 0x0,      0x10000000,    0,  2048,   0x00020000,        0x80,   1},
 	{0x2690A32C, 0x64,     0xFFFFFFFF, 0x0,      0x20000000,    0,  4096,   0x00040000,        0xE0,   1},
+
+#if 1 //quectel add , change the spare size to go with the nand flash datasheet
+	{0x2690AC98, 0x81676,  0xFFFFFFFF, 0x0,      0x20000000,    0,  4096,   0x00040000,        0x100,   1},
+#else
 	{0x2690AC98, 0x81676,  0xFFFFFFFF, 0x0,      0x20000000,    0,  4096,   0x00040000,        0xE0,   1},
-	{0x1580a1c2, 0x02,     0xFFFFFFFF, 0xFF,     0x08000000,    0,  2048,   0x00020000,        0x40,   0},
+#endif
+
 	/* Note: Width flag is 0 for 8 bit Flash and 1 for 16 bit flash   */
+
 };
 
 static int qpic_nand_mark_badblock(uint32_t page);
@@ -1245,15 +1265,26 @@ qpic_nand_non_onfi_probe(struct flash_info *flash)
 
 	/* Read the nand id. */
 	qpic_nand_fetch_id(flash);
-
+/*bik*/
 	/* Check if we support the device */
 	for (index = 0; index < (ARRAY_SIZE(supported_flash)); index++)
 	{
+    dprintf(CRITICAL, "Flash ID: 0x%x\n", flash->id);
+    dprintf(CRITICAL, "Mask: 0x%x\n", (flash->id & supported_flash[index].mask));
+    dprintf(CRITICAL, "Flash ID2: 0x%x\n", flash->id2);
+    dprintf(CRITICAL, "Mask ID2: 0x%x\n", (flash->id2 & supported_flash[index].mask2));
+
+    dprintf(CRITICAL, "Checking against \n");
+    dprintf(CRITICAL, "Arr. ID %d \n", index);
+    dprintf(CRITICAL, "ID: 0x%x\n",supported_flash[index].flash_id );
+    dprintf(CRITICAL, "ID2: 0x%x\n",supported_flash[index].flash_id2 );
+
 		if (((flash->id & supported_flash[index].mask) ==
 		    (supported_flash[index].flash_id & (supported_flash[index].mask))) &&
 		    ((flash->id2 & supported_flash[index].mask2) ==
 		    (supported_flash[index].flash_id2 & (supported_flash[index].mask2))))
 		{
+      dprintf(CRITICAL, " --- DEVICE FOUND\n");
 			dev_found = 1;
 			break;
 		}
@@ -1261,26 +1292,38 @@ qpic_nand_non_onfi_probe(struct flash_info *flash)
 
 	if (dev_found)
 	{
+    dprintf(CRITICAL, "   -- Set page size\n");
 		flash->page_size = supported_flash[index].pagesize;
+    dprintf(CRITICAL, "   -- Set block size\n");
 		flash->block_size = supported_flash[index].blksize;
+    dprintf(CRITICAL, "   -- Set spare size\n");
 		flash->spare_size = supported_flash[index].oobsize;
+    dprintf(CRITICAL, "   -- Get ECC Bits\n");
 		ecc_bits = supported_flash[index].ecc_8_bits;
 
 		/* Make sure that the block size and page size are defined. */
+    dprintf(CRITICAL, "   -- Assert block size\n");
 		ASSERT(flash->block_size);
+    dprintf(CRITICAL, "   -- Assert page size\n");
 		ASSERT(flash->page_size);
 
+    dprintf(CRITICAL, "   -- Get num blocks from array\n");
 		flash->num_blocks = supported_flash[index].density;
+    dprintf(CRITICAL, "   -- Divide block size and num blocks\n");
 		flash->num_blocks /= (flash->block_size);
+    dprintf(CRITICAL, "   -- Get pages per block\n");
 		flash->num_pages_per_blk = flash->block_size / flash->page_size;
+    dprintf(CRITICAL, "   -- Get pages per block mask\n");
 		flash->num_pages_per_blk_mask = flash->num_pages_per_blk - 1;
 
 		/* Look for 8bit BCH ECC Nand, TODO: ECC Correctability >= 8 */
-		if (ecc_bits)
+		if (ecc_bits) {
+    dprintf(CRITICAL, "   -- Set 8 bit ECC\n");
 			flash->ecc_width = NAND_WITH_8_BIT_ECC;
-		else
+    } else {
+      dprintf(CRITICAL, "   -- Set 4 bit ecc\n");
 			flash->ecc_width = NAND_WITH_4_BIT_ECC;
-
+    }
 		flash->density = supported_flash[index].density;
 		flash->widebus = supported_flash[index].widebus;
 
@@ -1290,8 +1333,8 @@ qpic_nand_non_onfi_probe(struct flash_info *flash)
 	/* Flash device is not supported, print flash device info and halt */
 	if (dev_found == 0)
 	{
-		dprintf(CRITICAL, "NAND device is not supported: nandid: 0x%x"
-						  "maker=0x%02x device=0x%02x\n",
+		dprintf(CRITICAL, "WWWWWWW NAND device is not supported: nandid: 0x%x"
+						  " maker=0x%02x device=0x%02x\n",
 				flash->id,
 				flash->vendor,
 				flash->device);
@@ -1318,11 +1361,14 @@ qpic_nand_init(struct qpic_nand_init_config *config)
 	nand_base = config->nand_base;
 
 	qpic_bam_init(config);
+  dprintf(CRITICAL, "NAND: ONFI Probe\n");
 
 	qpic_nand_non_onfi_probe(&flash);
+  dprintf(CRITICAL, "NAND: Save config\n");
 
 	/* Save the RAW and read/write configs */
 	qpic_nand_save_config(&flash);
+  dprintf(CRITICAL, "The fatal malloc\n");
 
 	flash_spare_bytes = (unsigned char *)malloc(flash.spare_size);
 
@@ -2171,3 +2217,431 @@ uint32_t nand_device_base()
 {
 	return nand_base;
 }
+
+
+#if 1 // def  QUECTEL_SYSTEM_BACKUP    // Ramos add for quectel for linuxfs restore
+
+int Quectel_flash_write(struct ptentry *ptn,unsigned offset, unsigned write_extra_bytes,const void *data,unsigned bytes)
+{
+	uint32_t page = (ptn->start * flash.num_pages_per_blk) + (offset / flash.page_size);
+	uint32_t lastpage = (ptn->start + ptn->length) * flash.num_pages_per_blk;
+	uint32_t *spare = (unsigned *)flash_spare_bytes;
+	const unsigned char *image = data;
+	uint32_t wsize;
+	uint32_t spare_byte_count = 0;
+	int r;
+
+	spare_byte_count = ((flash.cw_size * flash.cws_per_page)- flash.page_size);
+
+	if(write_extra_bytes)
+		wsize = flash.page_size + spare_byte_count;
+	else
+		wsize = flash.page_size;
+
+	memset(spare, 0xff, (spare_byte_count / flash.cws_per_page));
+
+	/* Verify first byte is at page boundary. */
+	if (offset & (flash.page_size - 1))
+	{
+		dprintf(CRITICAL, "Read request start not at page boundary: %d\n",
+				offset);
+		return NANDC_RESULT_PARAM_INVALID;
+	}
+
+	while (bytes > 0)
+	{
+		if (bytes < wsize)
+		{
+			dprintf(CRITICAL,
+					"flash_write_image: image undersized (%d < %d)\n",
+					bytes,
+					wsize);
+			return -1;
+		}
+
+		if (page >= lastpage)
+		{
+			dprintf(CRITICAL, "flash_write_image: out of space\n");
+			return -1;
+		}
+
+		if ((page & flash.num_pages_per_blk_mask) == 0)
+		{
+			if (qpic_nand_blk_erase(page))
+			{
+				dprintf(INFO,
+					"flash_write_image: bad block @ %d\n",
+					page / flash.num_pages_per_blk);
+
+				page += flash.num_pages_per_blk;
+				continue;
+			}
+		}
+
+		memcpy(rdwr_buf, image, flash.page_size);
+
+		if (write_extra_bytes)
+		{
+			memcpy(rdwr_buf + flash.page_size, image + flash.page_size, spare_byte_count);
+			r = qpic_nand_write_page(page,
+									 NAND_CFG,
+									 rdwr_buf,
+									 rdwr_buf + flash.page_size);
+		}
+		else
+		{
+			r = qpic_nand_write_page(page, NAND_CFG, rdwr_buf, spare);
+		}
+
+		if (r)
+		{
+			dprintf(INFO,
+					"flash_write_image: write failure @ page %d (src %d)\n",
+					page,
+					image - (const unsigned char *)data);
+
+			image -= (page & flash.num_pages_per_blk_mask) * wsize;
+			bytes += (page & flash.num_pages_per_blk_mask) * wsize;
+			page &= ~flash.num_pages_per_blk_mask;
+			if (qpic_nand_blk_erase(page))
+			{
+				dprintf(INFO,
+						"flash_write_image: erase failure @ page %d\n",
+						page);
+			}
+
+			qpic_nand_mark_badblock(page);
+
+			dprintf(INFO,
+					"flash_write_image: restart write @ page %d (src %d)\n",
+					page, image - (const unsigned char *)data);
+
+			page += flash.num_pages_per_blk;
+			continue;
+		}
+		page++;
+		image += wsize;
+		bytes -= wsize;
+	}
+
+	dprintf(INFO, "flash_write_image: success\n");
+	return 0;
+}
+
+
+/* Note: Ϊ  Quectel_flash_nand_read ʹãطҪ*/
+static int
+Quectel_qpic_nand_read_page(uint32_t page, unsigned char* buffer, unsigned char* spareaddr)
+{
+	struct cfg_params params;
+	uint32_t ecc;
+	uint32_t flash_sts[QPIC_NAND_MAX_CWS_IN_PAGE] = {0};
+	uint32_t buffer_sts[QPIC_NAND_MAX_CWS_IN_PAGE] = {0};
+	uint32_t erased_cw_sts[QPIC_NAND_MAX_CWS_IN_PAGE] = {0};
+	uint32_t addr_loc_0;
+	uint32_t addr_loc_1;
+	struct cmd_element *cmd_list_ptr = ce_array;
+	struct cmd_element *cmd_list_ptr_start = ce_array;
+	uint32_t num_cmd_desc = 0;
+	uint32_t num_data_desc = 0;
+	uint32_t status;
+	uint32_t i;
+	int nand_ret = NANDC_RESULT_SUCCESS;
+	uint8_t flags = 0;
+	uint32_t *cmd_list_temp = NULL;
+    uint32_t state_temp=0;
+#if DEBUG_QPIC_NAND
+    uint8_t *buffer_temp = buffer;
+#endif
+
+
+   // dprintf(CRITICAL, "Nand Flash flash.cws_per_page= %d, flash->ecc_width=%d,flash->widebus=%d cfg0=%d, cfg1=%d ecc_bch_cfg=%d\n", flash.cws_per_page,flash.ecc_width,flash.widebus  , cfg0,cfg1,ecc_bch_cfg);
+
+	/* UD bytes in last CW is 512 - cws_per_page *4.
+	 * Since each of the CW read earlier reads 4 spare bytes.
+	 */
+	uint16_t ud_bytes_in_last_cw = USER_DATA_BYTES_PER_CW - ((flash.cws_per_page - 1) << 2);
+	uint16_t oob_bytes = DATA_BYTES_IN_IMG_PER_CW - ud_bytes_in_last_cw;
+
+	params.addr0 = page << 16;
+	params.addr1 = (page >> 16) & 0xff;
+	params.cfg0 = cfg0;
+	params.cfg1 = cfg1;
+	params.cmd = NAND_CMD_PAGE_READ_ECC;
+	params.exec = 1;
+	ecc = ecc_bch_cfg;
+
+	/* Read all the Data bytes in the first 3 CWs. */
+	addr_loc_0 = NAND_RD_LOC_OFFSET(0);
+	addr_loc_0 |= NAND_RD_LOC_SIZE(DATA_BYTES_IN_IMG_PER_CW);
+	addr_loc_0 |= NAND_RD_LOC_LAST_BIT(1);
+
+
+	addr_loc_1 = NAND_RD_LOC_OFFSET(ud_bytes_in_last_cw);
+	addr_loc_1 |= NAND_RD_LOC_SIZE(oob_bytes);
+	addr_loc_1 |= NAND_RD_LOC_LAST_BIT(1);
+
+	status = qpic_nand_block_isbad(page);
+
+	if (status)
+		return status;
+
+	/* Reset and Configure erased CW/page detection controller */
+	qpic_nand_erased_status_reset(ce_array, BAM_DESC_LOCK_FLAG);
+
+	/* Queue up the command and data descriptors for all the codewords in a page
+	 * and do a single bam transfer at the end.*/
+	for (i = 0; i < flash.cws_per_page; i++)
+	{
+		num_cmd_desc = 0;
+		num_data_desc = 0;
+
+		if (i == 0)
+		{
+			cmd_list_ptr = qpic_nand_add_addr_n_cfg_ce(&params, cmd_list_ptr);
+
+			bam_add_cmd_element(cmd_list_ptr, NAND_DEV0_ECC_CFG,(uint32_t)ecc, CE_WRITE_TYPE);
+			cmd_list_ptr++;
+		}
+		else
+			cmd_list_ptr_start = cmd_list_ptr;
+
+		bam_add_cmd_element(cmd_list_ptr, NAND_FLASH_CMD, (uint32_t)params.cmd, CE_WRITE_TYPE);
+		cmd_list_ptr++;
+
+		if (i == flash.cws_per_page - 1)
+		{
+			addr_loc_0 = NAND_RD_LOC_OFFSET(0);
+			addr_loc_0 |= NAND_RD_LOC_SIZE(ud_bytes_in_last_cw);
+			addr_loc_0 |= NAND_RD_LOC_LAST_BIT(0);
+
+			/* Write addr loc 1 only for the last CW. */
+			bam_add_cmd_element(cmd_list_ptr, NAND_READ_LOCATION_n(1), (uint32_t)addr_loc_1, CE_WRITE_TYPE);
+			cmd_list_ptr++;
+
+			/* Add Data desc */
+			bam_add_one_desc(&bam,
+							 DATA_PRODUCER_PIPE_INDEX,
+							 (unsigned char *)PA((addr_t)buffer),
+							 ud_bytes_in_last_cw,
+							 0);
+			num_data_desc++;
+
+			bam_add_one_desc(&bam,
+							 DATA_PRODUCER_PIPE_INDEX,
+							 (unsigned char *)PA((addr_t)spareaddr),
+							 oob_bytes,
+							 BAM_DESC_INT_FLAG);
+			num_data_desc++;
+
+			bam_sys_gen_event(&bam, DATA_PRODUCER_PIPE_INDEX, num_data_desc);
+		}
+		else
+		{
+			/* Add Data desc */
+			bam_add_one_desc(&bam,
+							 DATA_PRODUCER_PIPE_INDEX,
+							 (unsigned char *)PA((addr_t)buffer),
+							 DATA_BYTES_IN_IMG_PER_CW,
+							 0);
+			num_data_desc++;
+			bam_sys_gen_event(&bam, DATA_PRODUCER_PIPE_INDEX, num_data_desc);
+		}
+
+		/* Write addr loc 0. */
+		bam_add_cmd_element(cmd_list_ptr,
+							NAND_READ_LOCATION_n(0),
+							(uint32_t)addr_loc_0,
+							CE_WRITE_TYPE);
+
+		cmd_list_ptr++;
+		bam_add_cmd_element(cmd_list_ptr,
+							NAND_EXEC_CMD,
+							(uint32_t)params.exec,
+							CE_WRITE_TYPE);
+		cmd_list_ptr++;
+
+		/* Enqueue the desc for the above commands */
+		bam_add_one_desc(&bam,
+					 CMD_PIPE_INDEX,
+					 (unsigned char*)cmd_list_ptr_start,
+					 PA((uint32_t)cmd_list_ptr - (uint32_t)cmd_list_ptr_start),
+					 BAM_DESC_NWD_FLAG | BAM_DESC_CMD_FLAG);
+		num_cmd_desc++;
+
+		bam_add_cmd_element(cmd_list_ptr, NAND_FLASH_STATUS, (uint32_t)PA((addr_t)&(flash_sts[i])), CE_READ_TYPE);
+
+		cmd_list_temp = (uint32_t *)cmd_list_ptr;
+
+		cmd_list_ptr++;
+
+		bam_add_cmd_element(cmd_list_ptr, NAND_BUFFER_STATUS, (uint32_t)PA((addr_t)&(buffer_sts[i])), CE_READ_TYPE);
+		cmd_list_ptr++;
+
+		/* Read erased CW status */
+		bam_add_cmd_element(cmd_list_ptr, NAND_ERASED_CW_DETECT_STATUS, (uint32_t)PA((addr_t)&erased_cw_sts[i]), CE_READ_TYPE);
+		cmd_list_ptr++;
+
+		if (i == flash.cws_per_page - 1)
+		{
+			flags = BAM_DESC_CMD_FLAG | BAM_DESC_UNLOCK_FLAG;
+		}
+		else
+			flags = BAM_DESC_CMD_FLAG;
+
+		/* Enqueue the desc for the above command */
+		bam_add_one_desc(&bam,
+					CMD_PIPE_INDEX,
+					(unsigned char*)PA((addr_t)cmd_list_temp),
+					PA((uint32_t)cmd_list_ptr - (uint32_t)cmd_list_temp),
+					flags);
+		num_cmd_desc++;
+
+		buffer += DATA_BYTES_IN_IMG_PER_CW;
+
+		/* Notify BAM HW about the newly added descriptors */
+		bam_sys_gen_event(&bam, CMD_PIPE_INDEX, num_cmd_desc);
+	}
+
+	qpic_nand_wait_for_data(DATA_PRODUCER_PIPE_INDEX);
+
+    	/* Check flash read status & errors */
+	for (i = 0; i < flash.cws_per_page ; i ++)
+	{
+#if 0
+		dprintf(INFO, "@Ramos FLASH STATUS: 0x%08x, BUFFER STATUS: 0x%08x, ERASED CW STATUS: 0x%08x\n",
+				flash_sts[i], buffer_sts[i], erased_cw_sts[i]);
+#endif
+
+        }
+
+	/* Check flash read status & errors */
+	for (i = 0; i < flash.cws_per_page ; i ++)
+	{
+#if DEBUG_QPIC_NAND
+		dprintf(INFO, "FLASH STATUS: 0x%08x, BUFFER STATUS: 0x%08x, ERASED CW STATUS: 0x%08x\n",
+				flash_sts[i], buffer_sts[i], erased_cw_sts[i]);
+#endif
+		/* If MPU or flash op erros are set, look for erased cw status.
+		 * If erased CW status is not set then look for bit flips to confirm
+		 * if the page is and erased page or a bad page
+		 */
+		if (flash_sts[i] & (NAND_FLASH_OP_ERR | NAND_FLASH_MPU_ERR))
+		{
+			if ((erased_cw_sts[i] & NAND_ERASED_CW) != NAND_ERASED_CW)
+			{
+
+                            return NANDC_RESULT_BAD_PAGE;  // Ramos  20160606  ɸͨĿǰиbugͨcase : 02464194 ֱӷ NANDC_RESULT_BAD_PAGE  󣬹
+#if DEBUG_QPIC_NAND
+			dprintf(CRITICAL, "Page: 0x%08x, addr0: 0x%08x, addr1: 0x%08x\n", page, params.addr0, params.addr1);
+#endif
+			/*
+			 * Depending on the process technology used there could be bit flips on
+			 * pages on the NAND card
+			 * When any page is erased the controller fills the page with all 1's.
+			 * When we try to read from an erased page and there are bit flips the
+			 * controller would not detect the page as erased page instead throws
+			 * an uncorrectable ecc error.
+			 * The NAND data sheet for that card would specify the number of bit flips
+			 * expected per code word. If the number of bit flips is less than expected
+			 * bit flips then we should ignore the uncorrectable ECC error and consider
+			 * the page as an erased page.
+			 */
+#if DEBUG_QPIC_NAND
+				for(i = 0; i < 4096; i += 8)
+				{
+					printf("DATA: %x %x %x %x %x %x %x %x",
+									buffer_temp[i], buffer_temp[i+1], buffer_temp[i+2], buffer_temp[i+3],
+									buffer_temp[i+4], buffer_temp[i+5], buffer_temp[i+6], buffer_temp[i+7]);
+					i += 8;
+					printf("DATA: %x %x %x %x %x %x %x %x\n",
+									buffer_temp[i], buffer_temp[i+1], buffer_temp[i+2], buffer_temp[i+3],
+									buffer_temp[i+4], buffer_temp[i+5], buffer_temp[i+6], buffer_temp[i+7]);
+				}
+#endif
+				nand_ret = qpic_nand_read_erased_page(page);
+				goto qpic_nand_read_page_error;
+				}
+		}
+	}
+qpic_nand_read_page_error:
+	return nand_ret;
+}
+
+/*  quectelõģﻳǸͨһbugbootloaderﵱȡһblockһpageʱ
+ ޷ȡblockˣblockʱnand flash check status Nand Flash error. Status = -2104291864
+ ֻǹquectel ȡrootfs cefs ԭflagblockblock eraseȻ
+ ںkernel޷ɹflastbootģʽϵͳɻָ
+ο case : 02464194
+ֻbootloaderȡrootfs cefs ԭflagõģطҪ*/
+int Quectel_flash_nand_read(struct ptentry *ptn,unsigned extra_per_page,unsigned offset,void *data,unsigned bytes)
+{
+    uint32_t page =(ptn->start * flash.num_pages_per_blk) + (offset / flash.page_size);
+    uint32_t lastpage = (ptn->start + ptn->length) * flash.num_pages_per_blk;
+    uint32_t count =(bytes + flash.page_size - 1 + extra_per_page) / (flash.page_size +extra_per_page);
+    uint32_t *spare = (unsigned *)flash_spare_bytes;
+    unsigned char *image = data;
+    uint32_t errors = 0;
+    int result = 0;
+
+    while ((page < lastpage))
+    {
+        if (count == 0)
+        {
+        	dprintf(INFO, "flash_read_image: success (%d errors)\n",
+        			errors);
+        	return NANDC_RESULT_SUCCESS;
+        }
+
+        dprintf(INFO, "@Ramos Read flag qpic_nand_read_page =0x%x, \n",page);
+        result = Quectel_qpic_nand_read_page(page, rdwr_buf, (unsigned char *) spare);
+        if (result == NANDC_RESULT_BAD_PAGE)
+        {
+            /* bad page, go to next page. */
+            /*  quectel ,   ȡblockһpage   ECC eraseblock  */
+            qpic_nand_blk_erase(page);
+            return NANDC_RESULT_BAD_PAGE;
+            /*
+            page++;
+            errors++;
+            continue;
+            */
+        }
+        else if (result == NANDC_RESULT_BAD_BLOCK)
+        {
+        	/* bad block, go to next block same offset. */
+        	page += flash.num_pages_per_blk;
+        	errors++;
+        	continue; // ǰblock ȥһblock
+        }
+
+         dprintf(INFO, "@Ramos Read flag qpic_nand_read_page result=%d, \n",result);
+
+        /* Copy the read page into correct location. */
+        memcpy(image, rdwr_buf, flash.page_size);
+        page++;
+        image += flash.page_size;
+        count -= 1;
+    }
+
+}
+
+int Quectel_flash_erase(struct ptentry *ptn, uint32_t EraseSize)
+{
+	int ret = 0, i;
+   	uint32_t blocksize = flash_block_size();
+
+    if(EraseSize > blocksize*((int)ptn->length))
+    {
+        return -1;
+    }
+	for (i = 0; i*blocksize < EraseSize ; i++) {
+		ret = qpic_nand_blk_erase((ptn->start + i) * flash.num_pages_per_blk);
+		if (ret)
+			dprintf(CRITICAL, "Erase operation failed @ page #%d\n",
+					ptn->start + i);
+	}
+	return ret;
+}
+
+#endif

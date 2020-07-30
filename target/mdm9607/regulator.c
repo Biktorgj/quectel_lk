@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2016 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -9,7 +9,7 @@
  *       copyright notice, this list of conditions and the following
  *       disclaimer in the documentation and/or other materials provided
  *       with the distribution.
- *     * Neither the name of The Linux Foundation nor the names of its
+ *     * Neither the name of The Linux Fundation, Inc. nor the names of its
  *       contributors may be used to endorse or promote products derived
  *       from this software without specific prior written permission.
  *
@@ -24,69 +24,38 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
  */
 
+#include <regulator.h>
+#include <rpm-smd.h>
+#include <bits.h>
 #include <debug.h>
-#include <reg.h>
-#include <platform/iomap.h>
-#include <platform/gpio.h>
-#include <blsp_qup.h>
 
-void gpio_tlmm_config(uint32_t gpio, uint8_t func,
-			uint8_t dir, uint8_t pull,
-			uint8_t drvstr, uint32_t enable)
+static uint32_t ldo13[][11]=
 {
-	uint32_t val = 0;
+	{
+		LDOA_RES_TYPE, 13,
+		KEY_SOFTWARE_ENABLE, 4, GENERIC_DISABLE,
+		KEY_MICRO_VOLT, 4, 0,
+		KEY_CURRENT, 4, 0,
+	},
+	{
+		LDOA_RES_TYPE, 13,
+		KEY_SOFTWARE_ENABLE, 4, GENERIC_ENABLE,
+		KEY_MICRO_VOLT, 4, 2850000, //<- vote for 2.85V
+		KEY_CURRENT, 4, 40,
+	},
+};
 
-	val |= pull;
-	val |= func << 2;
-	val |= drvstr << 6;
-	val |= dir << 9;
-
-	writel(val, (uint32_t *)GPIO_CONFIG_ADDR(gpio));
-	return;
+void regulator_enable(uint32_t enable)
+{
+	if (enable & REG_LDO13)
+		rpm_send_data(&ldo13[GENERIC_ENABLE][0], 36, RPM_REQUEST_TYPE);
 }
 
-/*Set a value to gpio either 0 or 1*/
-void gpio_set_val(uint32_t gpio, uint32_t val)
+void regulator_disable(uint32_t enable)
 {
-	writel((val << 0x1), (uint32_t *)GPIO_IN_OUT_ADDR(gpio));
-	return;
-}
-
-uint32_t gpio_get_state(uint32_t gpio)
-{
-	return readl(GPIO_IN_OUT_ADDR(gpio));
-}
-
-uint32_t gpio_status(uint32_t gpio)
-{
-	return readl(GPIO_IN_OUT_ADDR(gpio)) & GPIO_IN;
-}
-
-/* Configure gpio for blsp uart 2 */
-void gpio_config_uart_dm(uint8_t id)
-{
-	static struct {
-		unsigned int gpio_tx;
-		unsigned int gpio_rx;
-	} gpio_table[] = {
-		{ 0, 1 },
-		{ 4, 5 },
-		{ 12, 13 },
-		{ 16, 17 },
-		{ 20, 21 },
-		{ 8, 9 },
-	};
-
-	if (id >= ARRAY_SIZE(gpio_table))
-		return;
-
-	/* configure rx gpio */
-	gpio_tlmm_config(gpio_table[id].gpio_rx, 2, GPIO_INPUT, GPIO_NO_PULL,
-				GPIO_8MA, GPIO_DISABLE);
-
-	/* configure tx gpio */
-	gpio_tlmm_config(gpio_table[id].gpio_tx, 2, GPIO_OUTPUT, GPIO_NO_PULL,
-				GPIO_8MA, GPIO_DISABLE);
+	if (enable & REG_LDO13)
+		rpm_send_data(&ldo13[GENERIC_DISABLE][0], 36,RPM_REQUEST_TYPE);
 }

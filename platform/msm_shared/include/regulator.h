@@ -69,6 +69,7 @@
 #define REG_LDO2	BIT(1)
 #define REG_LDO6	BIT(5)
 #define REG_LDO12	BIT(11)
+#define REG_LDO13	BIT(12)
 #define REG_LDO14	BIT(13)
 #define REG_LDO17	BIT(16)
 #define REG_LDO28	BIT(27)

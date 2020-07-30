@@ -265,10 +265,111 @@ static struct vote_clk gcc_ce1_axi_clk = {
 		.ops      = &clk_ops_vote,
 	},
 };
+#if MMC_SDHCI_SUPPORT
+/* SDCC Clocks */
+static struct clk_freq_tbl ftbl_gcc_sdcc1_2_apps_clk[] =
+{
+	F(    144000,            cxo,   16,    3,    25),
+	F(    400000,            cxo,   12,    1,     4),
+	F(  20000000,          gpll0,   10,    1,     4),
+	F(  25000000,          gpll0,   16,    1,     2),
+	F(  50000000,          gpll0,   16,    0,     0),
+	F( 100000000,          gpll0,    8,    0,     0),
+	F( 177777778,          gpll0,  4.5,    0,     0),
+	F( 200000000,          gpll0,    4,    0,     0),
+	F_END
+};
+
+static struct rcg_clk sdcc1_apps_clk_src =
+{
+	.cmd_reg      = (uint32_t *) SDCC1_CMD_RCGR,
+	.cfg_reg      = (uint32_t *) SDCC1_CFG_RCGR,
+	.m_reg        = (uint32_t *) SDCC1_M,
+	.n_reg        = (uint32_t *) SDCC1_N,
+	.d_reg        = (uint32_t *) SDCC1_D,
+
+	.set_rate     = clock_lib2_rcg_set_rate_mnd,
+	.freq_tbl     = ftbl_gcc_sdcc1_2_apps_clk,
+	.current_freq = &rcg_dummy_freq,
+
+	.c = {
+		.dbg_name = "sdc1_clk",
+		.ops      = &clk_ops_rcg_mnd,
+	},
+};
+
+static struct branch_clk gcc_sdcc1_apps_clk =
+{
+	.cbcr_reg     = (uint32_t *) SDCC1_APPS_CBCR,
+	.parent       = &sdcc1_apps_clk_src.c,
+
+	.c = {
+		.dbg_name = "gcc_sdcc1_apps_clk",
+		.ops      = &clk_ops_branch,
+	},
+};
+
+static struct branch_clk gcc_sdcc1_ahb_clk =
+{
+	.cbcr_reg     = (uint32_t *) SDCC1_AHB_CBCR,
+	.has_sibling  = 1,
+
+	.c = {
+		.dbg_name = "gcc_sdcc1_ahb_clk",
+		.ops      = &clk_ops_branch,
+	},
+};
+
+static struct rcg_clk sdcc2_apps_clk_src =
+{
+	.cmd_reg      = (uint32_t *) SDCC2_CMD_RCGR,
+	.cfg_reg      = (uint32_t *) SDCC2_CFG_RCGR,
+	.m_reg        = (uint32_t *) SDCC2_M,
+	.n_reg        = (uint32_t *) SDCC2_N,
+	.d_reg        = (uint32_t *) SDCC2_D,
+
+	.set_rate     = clock_lib2_rcg_set_rate_mnd,
+	.freq_tbl     = ftbl_gcc_sdcc1_2_apps_clk,
+	.current_freq = &rcg_dummy_freq,
+
+	.c = {
+		.dbg_name = "sdc2_clk",
+		.ops      = &clk_ops_rcg_mnd,
+	},
+};
+
+static struct branch_clk gcc_sdcc2_apps_clk =
+{
+	.cbcr_reg     = (uint32_t *) SDCC2_APPS_CBCR,
+	.parent       = &sdcc2_apps_clk_src.c,
+
+	.c = {
+		.dbg_name = "gcc_sdcc2_apps_clk",
+		.ops      = &clk_ops_branch,
+	},
+};
+
+static struct branch_clk gcc_sdcc2_ahb_clk =
+{
+	.cbcr_reg     = (uint32_t *) SDCC2_AHB_CBCR,
+	.has_sibling  = 1,
+
+	.c = {
+		.dbg_name = "gcc_sdcc2_ahb_clk",
+		.ops      = &clk_ops_branch,
+	},
+};
+#endif
 
 /* Clock lookup table */
 static struct clk_lookup mdm_clocks_9607[] =
 {
+#if MMC_SDHCI_SUPPORT	//add by carl, for sdio clk
+	CLK_LOOKUP("sdc1_iface_clk", gcc_sdcc1_ahb_clk.c),
+	CLK_LOOKUP("sdc1_core_clk",  gcc_sdcc1_apps_clk.c),
+	CLK_LOOKUP("sdc2_iface_clk", gcc_sdcc2_ahb_clk.c),
+	CLK_LOOKUP("sdc2_core_clk",  gcc_sdcc2_apps_clk.c),
+#endif
 	CLK_LOOKUP("uart5_iface_clk", gcc_blsp1_ahb_clk.c),
 	CLK_LOOKUP("uart5_core_clk",  gcc_blsp1_uart5_apps_clk.c),
 

@@ -32,6 +32,7 @@
 #include <platform/timer.h>
 #include <platform/iomap.h>
 #include <clock.h>
+#include <mmc.h>
 #include <platform/clock.h>
 #include <platform.h>
 
@@ -116,6 +117,60 @@ void clock_config_uart_dm(uint8_t id)
 	}
 }
 
+#if MMC_SDHCI_SUPPORT
+void clock_init_mmc(uint32_t interface)
+{
+	char clk_name[64];
+	int ret;
+
+	snprintf(clk_name, sizeof(clk_name), "sdc%u_iface_clk", interface);
+
+	/* enable interface clock */
+	ret = clk_get_set_enable(clk_name, 0, 1);
+	if(ret)
+	{
+		dprintf(CRITICAL, "failed to set sdc1_iface_clk ret = %d\n", ret);
+		ASSERT(0);
+	}
+}
+
+/* Configure MMC clock */
+void clock_config_mmc(uint32_t interface, uint32_t freq)
+{
+	int ret = 0;
+	char clk_name[64];
+
+	snprintf(clk_name, sizeof(clk_name), "sdc%u_core_clk", interface);
+
+	if(freq == MMC_CLK_400KHZ)
+	{
+		ret = clk_get_set_enable(clk_name, 400000, 1);
+	}
+	else if(freq == MMC_CLK_50MHZ)
+	{
+		ret = clk_get_set_enable(clk_name, 50000000, 1);
+	}
+	else if(freq == MMC_CLK_200MHZ)
+	{
+		ret = clk_get_set_enable(clk_name, 200000000, 1);
+	}
+	else if(freq == MMC_CLK_171MHZ)
+	{
+		ret = clk_get_set_enable(clk_name, 171430000, 1);
+	}
+	else
+	{
+		dprintf(CRITICAL, "sdc frequency (%u) is not supported\n", freq);
+		ASSERT(0);
+	}
+
+	if(ret)
+	{
+		dprintf(CRITICAL, "failed to set %s ret = %d\n", clk_name, ret);
+		ASSERT(0);
+	}
+}
+#endif
 void clock_ce_enable(uint8_t instance)
 {
 	int ret;

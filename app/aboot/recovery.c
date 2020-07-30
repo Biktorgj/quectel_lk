@@ -62,6 +62,11 @@ extern uint32_t get_page_size();
 extern void reset_device_info();
 extern void set_device_root();
 
+#ifdef QUECTEL_FOTA
+extern int Ql_Set_Restore_Flags(uint32_t systemFlag,uint32_t modemFlag,uint32_t bootFlag,uint32_t recoveryfsFlag);
+#endif
+
+
 int get_recovery_message(struct recovery_message *out)
 {
 	struct ptentry *ptn;
@@ -333,9 +338,42 @@ int recovery_init (void)
 		}
 
 		valid_command = 1;
+#if 1 // QUECTEL_FOTA
+	/* Resolve power off when fota upgrading, system maybe can't upgrade next power on
+	    quectel fota upgrgade in the recovery, we clean this flag in the recovery ,when recovery exit, 
+	    because if clean this flag in bootloader, we power off before recovery mode, system cant goto recovery next time        
+	*/
+	// quectel fota, add for fota upgrade fail when retry QUECTEL_FOTA_RETRY_TIMES, restore the whole
+		dprintf(INFO,"fota_Retry_times: %d\n",msg.fota_Retry_times);
+		dprintf(INFO,"updateBackupStage: %d \n",msg.updateBackupStage);
+		if(QUECTEL_FOTA_RETRY_TIMES > msg.fota_Retry_times)
+		{
+			msg.fota_Retry_times++;// fota upgrade retry times +1
+			set_recovery_message(&msg);	// send recovery message
+		}
+		else
+		{
+			// retry QUECTEL_FOTA_RETRY_TIMES failed, clear the flag, and set the all restore flag, for the whole system restore
+			if(0 == msg.updateBackupStage)
+			{
+				/* updateBackupStage 0, means backup partition is OK, so we can restore the system
+				this avoid 5 times update backup partition fail, backup parttion maybe is invalid*/
+				memset(&msg, 0, sizeof(msg));
+				set_recovery_message(&msg); // send recovery message
+				Ql_Set_Restore_Flags(1,1,1,1);			
+			}
+			else
+			{
+				/*update backup partition fail 5 times, so not set all restore flag, baceuse backup partition maybe erased*/
+				memset(&msg, 0, sizeof(msg));
+				set_recovery_message(&msg); // send recovery message
+			}
+		}
+#else
 		strlcpy(msg.command, "", sizeof(msg.command));	// to safe against multiple reboot into recovery
 		strlcpy(msg.status, "OKAY", sizeof(msg.status));
 		set_recovery_message(&msg);	// send recovery message
+#endif
 		boot_into_recovery = 1;		// Boot in recovery mode
 		return 0;
 	}
