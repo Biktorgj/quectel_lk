@@ -2969,47 +2969,15 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 	}
 
 	dprintf(INFO, "writing %d bytes to '%s'\n", sz, ptn->name);
-#if 1 // def  QUECTEL_SYSTEM_BACKUP  
-if(!strcmp(ptn->name,"sys_back")
-	|| !strcmp(ptn->name,"tz_b")
-	|| !strcmp(ptn->name,"rpm_b")
-	|| !strcmp(ptn->name,"aboot_b")
-	|| !strcmp(ptn->name,"boot_b")
-	|| !strcmp(ptn->name,"recoveryfs_b")
-	|| !strcmp(ptn->name,"qdsp6sw_b")
-	|| !strcmp(ptn->name,"modem_b"))
-{
-	 dprintf(INFO, "flash_write 111 writing %d bytes to '%s'  extra=%d \n", sz, ptn->name,extra);
-	 extra =0 ;
-	if (flash_write(ptn, extra, data, sz)) {
-		fastboot_fail("flash write failure");
-		return;
-		}
-}
-else
-{
-#endif 	
+
+{ 	
 	if ((sz > UBI_MAGIC_SIZE) && (!memcmp((void *)data, UBI_MAGIC, UBI_MAGIC_SIZE))) {
 		
 	dprintf(INFO, "flash_ubi_img writing %d bytes to '%s'\n", sz, ptn->name);
-#if 1 // def  QUECTEL_SYSTEM_BACKUP  
-/******************************************************************************************
-Ramos-2018/04/13: 修复下载UBI 文件系统镜像时断电容易出现下次下载失败问题
-Refer to [Issue-Depot].[IS0000118][Submitter:ramos.zhang,Date:2018-04-13]
-<fastboot 下载UBI 文件系统镜像时断电，下次继续下载，容易出现下次读取给分区UBI数据异常造成无法下载。>
-******************************************************************************************/
-	 	dprintf(INFO, "UBI Image flash_write 111 writing %d bytes to '%s'  extra=%d \n", sz, ptn->name,extra);
-	 	extra =0 ;
-		if (flash_write(ptn, extra, data, sz)) {
-			fastboot_fail("flash write failure");
-			return;
-			}
-#else
 		if (flash_ubi_img(ptn, data, sz)) {
 			fastboot_fail("flash write failure");
 			return;
 		}
-#endif
 	} else {
 		
 	dprintf(INFO, "flash_write 222 writing %d bytes to '%s'  extra=%d \n", sz, ptn->name,extra);
@@ -3018,9 +2986,7 @@ Refer to [Issue-Depot].[IS0000118][Submitter:ramos.zhang,Date:2018-04-13]
 			return;
 		}
 	}
-#if 1 // def  QUECTEL_SYSTEM_BACKUP  
 }
-#endif	
 	dprintf(INFO, "partition '%s' updated\n", ptn->name);
 	fastboot_okay("");
 }
@@ -3595,191 +3561,11 @@ static void quectel_sd_fastboot(void) {
 }
 #endif
 
-//add by hertz.zhou 2017.02.23 
-#if 1
-#include <platform/gpio.h>
-
-#define CMD_BUFFER_LEN	64
-int cmd_buffer_cnt = 0;
-char cmd_buffer[CMD_BUFFER_LEN];
-
-struct gpio_test_s{
-	uint32_t mod_pin;
-	uint32_t bb_gpio;
-};
-
-//the table which include the pins to be tested
-struct gpio_test_s gpio_test_table[] = {
-	{1, 25},		//WAKEUP_IN
-	{2, 10},		//AP_READY
-	{3, 42},		//SLEEP_IND
-	{4, 11},		//W_DISABLE#
-	{13, 34},		//USIM_PRESENCE
-	{23, 26},		//SD1_INS_DET
-	{24, 76},		//PCM_IN
-	{25, 77},		//PCM_OUT
-	{26, 79},		//PCM_SYNC
-	{27, 78},		//PCM_CLK
-	{37, 22},		//SPI_CS
-	{38, 20},		//SPI_MOSI
-	{39, 21},		//SPI_MISO
-	{40, 23},		//SPI_CLK
-	{41, 7},		//I2C_SCL
-	{42, 6},		//I2C_SDA
-	{62, 75},		//RI
-	{63, 4},		//DCD
-	{64, 3},		//CTS
-	{65, 2},		//RTS
-	{66, 5},		//DTR
-	{67, 0},		//TXD
-	{68, 1},		//RXD
-};
-
-const int gpio_test_table_size = sizeof(gpio_test_table) / sizeof(struct gpio_test_s);
-
-int gpio_is_in_table(uint32_t gpio)
-{
-	int ret = 0;
-	int i;
-
-	for(i = 0; i < gpio_test_table_size; i++)
-	{
-		if(gpio_test_table[i].mod_pin == gpio)
-		{
-			ret = 1;
-			break;
-		}
-	}
-
-	return ret;
-}
-
-uint32_t gpio_mod_pin_mapto_bb(uint32_t mod_pin)
-{
-	int i;
-
-	for(i = 0; i < gpio_test_table_size; i++)
-	{
-		if(gpio_test_table[i].mod_pin == mod_pin)
-		{
-			return gpio_test_table[i].bb_gpio;
-		}
-	}
-
-	return 0;
-}
-/*
- *you should input,for example ,"GPIO,23",to test if pin23 is ok
- and if ok ,the response will be "OKIO,23"
- * */
-void gpio_test_mode(void)
-{
-	char ch;
-	uint32_t gpio, enable, i;
-	
-	cmd_buffer_cnt = 0;
-	memset(cmd_buffer, 0, CMD_BUFFER_LEN);
-
-	while(1)
-	{
-		ch = uart_getc(0, 1);
-		putc(ch);
-
-		if(ch == 0x0a)//change line
-		{
-			continue;
-		}
-		
-		if(ch == 0x0d)//if ch is enter
-		{	
-			if(memcmp(cmd_buffer, "GPIO,", 5))//if the input start with "GPIO,"
-			{
-				printf("%s: %d\n", __func__, __LINE__);
-				goto error;
-			}
-			
-			gpio = 0;
-			enable = 0;
-			i = 5;
-			while(isdigit(cmd_buffer[i]))//get the pin number.example "GPIO,23"
-			{
-				gpio *= 10;
-				gpio += cmd_buffer[i] - '0';
-				i++;
-			}
-
-			if(gpio == 999)//exit test
-			{
-				break;
-			}
-
-			i++;
-			enable += cmd_buffer[i] - '0';
-
-			if((gpio != 0 && !gpio_is_in_table(gpio)) || (enable != 0 && enable !=1))
-			{
-				printf("%s: %d\n", __func__, __LINE__);
-				goto error;
-			}
-			
-			if(!gpio)
-			{
-				for(i = 0; i < gpio_test_table_size; i++)//test all pins in the table 
-				{
-					gpio_tlmm_config(gpio_test_table[i].bb_gpio, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA, GPIO_DISABLE);
-					dsb();
-					gpio_set_val(gpio_test_table[i].bb_gpio, enable);
-					dsb();
-				}
-			}
-			//the special pin to be test
-			else
-			{
-				gpio = gpio_mod_pin_mapto_bb(gpio);
-				gpio_tlmm_config(gpio, 0, GPIO_OUTPUT, GPIO_NO_PULL, GPIO_8MA, GPIO_DISABLE);
-				dsb();
-				gpio_set_val(gpio, enable);
-				dsb();
-			}
-			
-			cmd_buffer_cnt = 0;
-			memset(cmd_buffer, 0, CMD_BUFFER_LEN);
-			printf("OK\r\n");
-			continue;
-error:
-			printf("ERROR\r\n");
-			cmd_buffer_cnt = 0;
-			memset(cmd_buffer, 0, CMD_BUFFER_LEN);
-		}
-		else
-		{
-			cmd_buffer[cmd_buffer_cnt++] = ch;
-			if(cmd_buffer_cnt == CMD_BUFFER_LEN)
-			{
-				cmd_buffer_cnt = 0;
-			}
-		}
-	}
-
-	for(i = 0; i < gpio_test_table_size; i++)
-	{
-		gpio_tlmm_config(gpio_test_table[i].bb_gpio, 0, GPIO_INPUT, GPIO_NO_PULL, GPIO_2MA, GPIO_DISABLE);
-		dsb();
-	}
-}
-#endif
-//end hertz.zhou 2017.02.23
 
 
 void aboot_init(const struct app_descriptor *app)
 {
 	unsigned reboot_mode = 0;
-	unsigned usb_init = 0;
-	unsigned sz = 0;
-	char ch;
-	int fh = 0;
-	char diag_cnt = 0;
-	int i;
 
 	/* Setup page size information for nv storage */
 	if (target_is_emmc_boot())
@@ -3832,80 +3618,6 @@ void aboot_init(const struct app_descriptor *app)
 		goto fastboot;
 	}
 #endif
-	
-//add hertz.zhou 2017.02.23
-#if QUECTEL_FASTBOOT
-	
-/*
- * input CTRL+C,and choose PINTEST mode or fastboot mode
- * when the test ended goto exit_pintest_mode
- * */
-	printf("CTRL+C: enter instruction mode\n");
-#ifndef QUECTEL_FLASH_SUPPORT_1G
-	printf("RECOVERY,");
-#endif
-	printf("PINTEST OR FASTBOOT\n\n\n\n");
-
-	for (i = 10; i != 0; --i)
-	{
-		if (!getc(&ch) && ch == 0x03)
-		{
-			printf("PINTEST: test gpio(s) connectivity.\n");
-			printf("fastboot: set fastboot mode.\n");
-#ifndef QUECTEL_FLASH_SUPPORT_1G
-			printf("recovery: set recovery mode.\n");
-#endif
-			while(1)
-			{
-				ch = uart_getc(0, 1);
-				putc(ch);
-
-				if((ch >= 'A' && ch <= 'Z')
-				 ||(ch >= 'a' && ch <= 'z')
-				 || ch == 0x0d)
-				{
-					if(ch == 0x0d)
-					{
-						if(strlen("PINTEST") == cmd_buffer_cnt
-							&& !memcmp(cmd_buffer, "PINTEST", cmd_buffer_cnt))
-						{
-							printf("PIN TEST MODE\r\n", __func__);
-							gpio_test_mode();
-							goto exit_pintest_mode;
-						}
-						else if(strlen("fastboot") == cmd_buffer_cnt
-							&& !memcmp(cmd_buffer, "fastboot", cmd_buffer_cnt))
-						{
-							printf("%s: going to fastboot mode.\n", __func__);
-							goto fastboot;
-						}
-                        // add by len for manual into recovery, 2018-1-18
-						//add end
-
-					}
-					else
-					{
-						cmd_buffer[cmd_buffer_cnt++] = ch;
-						if(cmd_buffer_cnt == CMD_BUFFER_LEN)
-						{
-							cmd_buffer_cnt = 0;
-						}
-					}
-				}
-				else
-				{
-					cmd_buffer_cnt = 0;
-				}
-			}
-		}
-		
-		printf("%s char: %c\n", __func__, ch);
-		mdelay(10);
-	}
-exit_pintest_mode:
-#endif
-//end hertz.zhou 2017.02.23
-
 	/*
 	 * Check power off reason if user force reset,
 	 * if yes phone will do normal boot.
