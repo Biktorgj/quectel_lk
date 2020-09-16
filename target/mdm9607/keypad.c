@@ -33,7 +33,11 @@
 /* GPIO that controls the button
  * for FASTBOOT.
  */
-#define FASTBOOT_KEY_GPIO_ID        37
+/* 
+	Use GPIO_11 (W_DISABLE) as source for fastboot 
+	Pinephone GPIO Pin is #232. Set as 0 and reset to enter fastboot, 1 for normal boot	
+*/
+#define FASTBOOT_KEY_GPIO_ID     11   //37
 
 /*
  * Returns fastboot button state.

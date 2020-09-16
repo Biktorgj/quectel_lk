@@ -3648,10 +3648,10 @@ void aboot_init(const struct app_descriptor *app)
 			(keys_get_state(KEY_BACK) || keys_get_state(KEY_VOLUMEDOWN)))
 			boot_into_fastboot = true;
 	}
-	#if NO_KEYPAD_DRIVER
+
 	if (fastboot_trigger())
 		boot_into_fastboot = true;
-	#endif
+
 
 #if USE_PON_REBOOT_REG
 	reboot_mode = check_hard_reboot_mode();
