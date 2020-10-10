@@ -151,7 +151,7 @@ static const char *emmc_cmdline = " androidboot.emmc=true";
 static const char *usb_sn_cmdline = " androidboot.serialno=";
 static const char *androidboot_mode = " androidboot.mode=";
 static const char *alarmboot_cmdline = " androidboot.alarmboot=true";
-static const char *loglevel         = " quiet";
+static const char *loglevel         = " verbose"; // no quiet, need dbg
 static const char *battchg_pause = " androidboot.mode=charger";
 static const char *auth_kernel = " androidboot.authorized_kernel=true";
 static const char *secondary_gpt_enable = " gpt";
@@ -327,6 +327,18 @@ int quectel_fastboot_force_entry_flag_set(void)
 	}	
 	return 0 ;
 }
+int quectel_recovery_force_entry_flag_set(void)
+{
+	struct fastboot_message msg;
+
+	strlcpy(msg.command, "boot_recovery", sizeof(msg.command));	
+	strlcpy(msg.status, "force", sizeof(msg.status));
+	if(0 != set_fastboot_message(&msg))
+	{
+		return -1;
+	}	
+	return 0 ;
+}
 int quectel_fastboot_force_entry_flag_clean(void)
 {
 	struct fastboot_message msg;
@@ -346,6 +358,27 @@ int quectel_is_fastboot_entry_force(void)
 	if(0 == get_fastboot_message(&msg))
 	{
 		if((!strcmp(msg.command, "boot_fastboot")) && (!strcmp(msg.status, "force")))
+		{
+			return 1;
+		}
+		else
+		{
+			return 0;
+		}
+	}
+	else
+	{
+		return 0;
+	}
+	return 0;
+}
+int quectel_is_recovery_entry_force(void)
+{
+	struct fastboot_message msg;
+
+	if(0 == get_fastboot_message(&msg))
+	{
+		if((!strcmp(msg.command, "boot_recovery")) && (!strcmp(msg.status, "force")))
 		{
 			return 1;
 		}
@@ -3042,6 +3075,16 @@ void cmd_reboot_bootloader(const char *arg, void *data, unsigned sz)
 	reboot_device(FASTBOOT_MODE);
 }
 
+
+void cmd_reboot_recovery(const char *arg, void *data, unsigned sz)
+{
+
+	struct recovery_message msg;
+	snprintf(msg.recovery, sizeof(msg.recovery), "recovery\n");
+	quectel_recovery_force_entry_flag_set();
+	fastboot_okay("");
+	reboot_device(RECOVERY_MODE);
+}
 void cmd_oem_enable_charger_screen(const char *arg, void *data, unsigned size)
 {
 	dprintf(INFO, "Enabling charger screen check\n");
@@ -3447,6 +3490,7 @@ void aboot_fastboot_register_commands(void)
 											{"continue", cmd_continue},
 											{"reboot", cmd_reboot},
 											{"reboot-bootloader", cmd_reboot_bootloader},
+											{"oem reboot-recovery", cmd_reboot_recovery},
 											{"oem unlock", cmd_oem_unlock},
 											{"oem unlock-go", cmd_oem_unlock_go},
 											{"oem lock", cmd_oem_lock},
@@ -3616,6 +3660,10 @@ void aboot_init(const struct app_descriptor *app)
 	if(quectel_is_fastboot_entry_force())// check fastboot download flag.
 	{
 		goto fastboot;
+	} else if (quectel_is_recovery_entry_force()) {
+		boot_into_recovery = 1;
+		quectel_fastboot_force_entry_flag_clean(); // remove the flag after setting it
+		
 	}
 #endif
 	/*
