@@ -3655,10 +3655,9 @@ void aboot_init(const struct app_descriptor *app)
 
 	memset(display_panel_buf, '\0', MAX_PANEL_BUF_SIZE);
 #if QUECTEL_FASTBOOT
-	/* this function use for check fastboot download,
-	if fastboot download not completely, the system must entry fastboot again for download*/
 	if(quectel_is_fastboot_entry_force())// check fastboot download flag.
 	{
+		quectel_fastboot_force_entry_flag_clean();
 		goto fastboot;
 	} else if (quectel_is_recovery_entry_force()) {
 		boot_into_recovery = 1;
