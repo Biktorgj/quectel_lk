@@ -90,13 +90,8 @@
 #include "mdtp.h"
 #include "fastboot_test.h"
 #include "qpic_nand.h"
-#include "fotainfo.h"
 
-
-#define QUECTEL_ALL_RESTORE // quectel add
 #define	QUECTEL_FASTBOOT	1  // quectel deine
-
-
 extern  bool target_use_signed_kernel(void);
 extern void platform_uninit(void);
 extern void target_uninit(void);
@@ -116,6 +111,8 @@ struct fastboot_cmd_desc {
 	char * name;
 	fastboot_cmd_fn cb;
 };
+
+bool stay_in_fastboot;
 
 #define EXPAND(NAME) #NAME
 #define TARGET(NAME) EXPAND(NAME)
@@ -168,7 +165,6 @@ static const char *baseband_dsda    = " androidboot.baseband=dsda";
 static const char *baseband_dsda2   = " androidboot.baseband=dsda2";
 static const char *baseband_sglte2  = " androidboot.baseband=sglte2";
 static const char *warmboot_cmdline = " qpnp-power-on.warm_boot=1";
-
 
 static unsigned page_size = 0;
 static unsigned page_mask = 0;
@@ -270,13 +266,11 @@ int set_fastboot_message(const struct fastboot_message *in)
 	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // Ϣڵһblockĵһpage
 	memset((void *)temp_buf,0,pagesize);
 	memcpy((void *) temp_buf, in, sizeof(*in));
-	dprintf(CRITICAL, "[Ramos] set fastboot message start !!!\n");
 	if (Quectel_flash_write(ptn,offset, 0, temp_buf, sizeof(temp_buf))) 
 	{
 		dprintf(CRITICAL, "ERROR: FASTBOOT flash write fail!\n");
 		return -1;
 	}
-	dprintf(CRITICAL, "[Ramos] set fastboot message end !!!\n");
 	return 0;
 }
 
@@ -304,13 +298,11 @@ int get_fastboot_message(const struct fastboot_message *out)
 
 	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // Ϣڵһblockĵһpage
 	memset((void *)temp_buf,0,pagesize);
-	dprintf(CRITICAL, "[Ramos] get fastboot message start !!!\n");
 	if (flash_read(ptn,offset,temp_buf, sizeof(temp_buf))) 
 	{
 		dprintf(CRITICAL, "ERROR: FASTBOOT flash write fail!\n");
 		return -1;
 	}
-	dprintf(CRITICAL, "[Ramos] get fastboot message end !!!\n");
 	memcpy(out, temp_buf, sizeof(*out));
 	return 0;
 }
@@ -440,6 +432,10 @@ unsigned char *update_cmdline(const char * cmdline)
 	if (cmdline && cmdline[0]) {
 		cmdline_len = strlen(cmdline);
 		have_cmdline = 1;
+	}
+	else {
+		dprintf(CRITICAL,"cmdline is NULL\n");
+		ASSERT(0);
 	}
 	if (target_is_emmc_boot()) {
 		cmdline_len += strlen(emmc_cmdline);
@@ -695,8 +691,6 @@ unsigned char *update_cmdline(const char * cmdline)
 			while ((*dst++ = *src++));
 			free(target_boot_params);
 		}
-
-		// add end
 	}
 
 
@@ -1311,8 +1305,7 @@ int boot_linux_from_mmc(void)
 	hdr->ramdisk_addr = VA((addr_t)(hdr->ramdisk_addr));
 	hdr->tags_addr = VA((addr_t)(hdr->tags_addr));
 
-	
-    kernel_size = ROUND_TO_PAGE(kernel_size,  page_mask);
+	kernel_size = ROUND_TO_PAGE(kernel_size,  page_mask);
 	/* Check if the addresses in the header are valid. */
 	if (check_aboot_addr_range_overlap(hdr->kernel_addr, kernel_size) ||
 		check_aboot_addr_range_overlap(hdr->ramdisk_addr, ramdisk_actual))
@@ -1426,7 +1419,7 @@ int boot_linux_from_flash(void)
 	unsigned ramdisk_actual;
 	unsigned imagesize_actual;
 	unsigned second_actual = 0;
-	
+
 #if DEVICE_TREE
 	struct dt_table *table;
 	struct dt_entry dt_entry;
@@ -1436,6 +1429,7 @@ int boot_linux_from_flash(void)
 	unsigned int dtb_size = 0;
 	unsigned char *best_match_dt_addr = NULL;
 #endif
+
 	if (target_is_emmc_boot()) {
 		hdr = (struct boot_img_hdr *)EMMC_BOOT_IMG_HEADER_ADDR;
 		if (memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE)) {
@@ -1534,13 +1528,29 @@ int boot_linux_from_flash(void)
 			return -1;
 		}
 #else
+		if (UINT_MAX < ((uint64_t)kernel_actual + (uint64_t)ramdisk_actual+ page_size)) {
+			dprintf(CRITICAL, "Integer overflow detected in bootimage header fields\n");
+			return -1;
+		}
 		imagesize_actual = (page_size + kernel_actual + ramdisk_actual);
 #endif
 
-		dprintf(INFO, "AAAAALoading (%s) image (%d): start\n",
+		dprintf(INFO, "Loading (%s) image (%d): start\n",
 			(!boot_into_recovery ? "boot" : "recovery"),imagesize_actual);
 		bs_set_timestamp(BS_KERNEL_LOAD_START);
 
+		if (UINT_MAX - page_size < imagesize_actual)
+		{
+			dprintf(CRITICAL,"Integer overflow detected in bootimage header fields %u %s\n", __LINE__,__func__);
+			return -1;
+		}
+
+		/*Check the availability of RAM before reading boot image + max signature length from flash*/
+		if (target_get_max_flash_size() < (imagesize_actual + page_size))
+		{
+			dprintf(CRITICAL, "bootimage  size is greater than DDR can hold\n");
+			return -1;
+		}
 		/* Read image without signature */
 		if (flash_read(ptn, offset, (void *)image_addr, imagesize_actual))
 		{
@@ -1548,7 +1558,7 @@ int boot_linux_from_flash(void)
 				return -1;
 		}
 
-		dprintf(INFO, "AAAAALoading (%s) image (%d): done\n",
+		dprintf(INFO, "Loading (%s) image (%d): done\n",
 			(!boot_into_recovery ? "boot" : "recovery"), imagesize_actual);
 		bs_set_timestamp(BS_KERNEL_LOAD_DONE);
 
@@ -1607,12 +1617,12 @@ int boot_linux_from_flash(void)
 	else
 	{
 		offset = page_size;
-		
-        kernel_actual = ROUND_TO_PAGE(hdr->kernel_size, page_mask);
+
+		kernel_actual = ROUND_TO_PAGE(hdr->kernel_size, page_mask);
 		ramdisk_actual = ROUND_TO_PAGE(hdr->ramdisk_size, page_mask);
 		second_actual = ROUND_TO_PAGE(hdr->second_size, page_mask);
-		
-        dprintf(INFO, "BBBBLoading (%s) image (%d): start\n",
+
+		dprintf(INFO, "Loading (%s) image (%d): start\n",
 				(!boot_into_recovery ? "boot" : "recovery"), kernel_actual + ramdisk_actual);
 
 		bs_set_timestamp(BS_KERNEL_LOAD_START);
@@ -1639,7 +1649,7 @@ int boot_linux_from_flash(void)
 
 		offset += ramdisk_actual;
 
-		dprintf(INFO, "BBBBBLoading (%s) image (%d): done\n",
+		dprintf(INFO, "Loading (%s) image (%d): done\n",
 				(!boot_into_recovery ? "boot" : "recovery"), kernel_actual + ramdisk_actual);
 
 		bs_set_timestamp(BS_KERNEL_LOAD_DONE);
@@ -2336,8 +2346,7 @@ void cmd_erase_nand(const char *arg, void *data, unsigned sz)
 		fastboot_fail("unknown partition name");
 		return;
 	}
-    
-    dprintf(INFO, "@Ramos, arg(%s)erase nand partition:%s, size=%d", arg, ptn->name, ptn->length);
+
 	if (flash_erase(ptn)) {
 		fastboot_fail("failed to erase partition");
 		return;
@@ -2981,7 +2990,7 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 		|| !strcmp(ptn->name, "recoveryfs")
 		|| !strcmp(ptn->name, "modem"))
 		extra = 1;
-	else{
+	else {
 		rounded_size = ROUNDUP(sz, page_size);
 		bytes_to_round_page = rounded_size - sz;
 		if (bytes_to_round_page) {
@@ -3002,24 +3011,17 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 	}
 
 	dprintf(INFO, "writing %d bytes to '%s'\n", sz, ptn->name);
-
-{ 	
 	if ((sz > UBI_MAGIC_SIZE) && (!memcmp((void *)data, UBI_MAGIC, UBI_MAGIC_SIZE))) {
-		
-	dprintf(INFO, "flash_ubi_img writing %d bytes to '%s'\n", sz, ptn->name);
 		if (flash_ubi_img(ptn, data, sz)) {
 			fastboot_fail("flash write failure");
 			return;
 		}
 	} else {
-		
-	dprintf(INFO, "flash_write 222 writing %d bytes to '%s'  extra=%d \n", sz, ptn->name,extra);
 		if (flash_write(ptn, extra, data, sz)) {
 			fastboot_fail("flash write failure");
 			return;
 		}
 	}
-}
 	dprintf(INFO, "partition '%s' updated\n", ptn->name);
 	fastboot_okay("");
 }
@@ -3031,7 +3033,6 @@ void cmd_flash(const char *arg, void *data, unsigned sz)
 	{
 		if(0 != quectel_fastboot_force_entry_flag_set())
 		{
-			dprintf(INFO,"[Ramos] set fastboot force flag \n");
 			fastboot_fail("set fastboot force flag failed");
 			return;
 		}
@@ -3075,6 +3076,11 @@ void cmd_reboot_bootloader(const char *arg, void *data, unsigned sz)
 	reboot_device(FASTBOOT_MODE);
 }
 
+void cmd_stay_in_fastboot(const char *arg, void *data, unsigned sz)
+{
+	stay_in_fastboot = true;
+	fastboot_fail("Waiting for orders!");
+}
 
 void cmd_reboot_recovery(const char *arg, void *data, unsigned sz)
 {
@@ -3491,6 +3497,7 @@ void aboot_fastboot_register_commands(void)
 											{"reboot", cmd_reboot},
 											{"reboot-bootloader", cmd_reboot_bootloader},
 											{"oem reboot-recovery", cmd_reboot_recovery},
+											{"oem stay", cmd_stay_in_fastboot},
 											{"oem unlock", cmd_oem_unlock},
 											{"oem unlock-go", cmd_oem_unlock_go},
 											{"oem lock", cmd_oem_lock},
@@ -3566,51 +3573,10 @@ int quectel_fource_boot(void)
 }	
 #endif
 
-#if MMC_SDHCI_SUPPORT
-int quectel_f_mount(void);
-unsigned quectel_f_read(const char *fname, void *buff, unsigned size);
-void target_sdc_init(void);
-void target_sdc_uninit(void);
-
-static void quectel_cmd_flash_sd(const char *ptn, const char *file) {
-	char update_file[256];
-	unsigned f_size;
-	void *buff = target_get_scratch_address();
-	unsigned size = target_get_max_flash_size();
-
-	snprintf(update_file, sizeof(update_file), "0:\\update\\%s", file);
-	f_size = quectel_f_read(update_file, buff, size);
-	if (f_size)
-		cmd_flash_nand(ptn, buff, f_size);
-};
-
-static void quectel_sd_fastboot(void) {
-	target_sdc_init();
-	
-	if (target_mmc_device() && quectel_f_mount() == 0) {
-		quectel_cmd_flash_sd("sbl", "sbl1.mbn");
-		//quectel_cmd_flash_sd("mibib", "partition.mbn");
-		quectel_cmd_flash_sd("tz", "tz.mbn");
-		quectel_cmd_flash_sd("rpm", "rpm.mbn");
-		//quectel_cmd_flash_sd("aboot", "appsboot.mbn");
-		quectel_cmd_flash_sd("boot", "mdm9607-perf-boot.img");
-		quectel_cmd_flash_sd("modem", "NON-HLOS.ubi");
-		quectel_cmd_flash_sd("recovery", "mdm9607-perf-boot.img");
-		quectel_cmd_flash_sd("recoveryfs", "mdm-perf-recovery-image-mdm9607-perf.ubi");
-		quectel_cmd_flash_sd("sys_back", "mdm9607-perf-sysfs.ubi");	
-		quectel_cmd_flash_sd("system", "mdm9607-perf-sysfs.ubi");
-	}
-
-	target_sdc_uninit();
-}
-#endif
-
-
-
 void aboot_init(const struct app_descriptor *app)
 {
 	unsigned reboot_mode = 0;
-
+	stay_in_fastboot = false;
 	/* Setup page size information for nv storage */
 	if (target_is_emmc_boot())
 	{
@@ -3654,6 +3620,18 @@ void aboot_init(const struct app_descriptor *app)
 	dprintf(SPEW,"serial number: %s\n",sn_buf);
 
 	memset(display_panel_buf, '\0', MAX_PANEL_BUF_SIZE);
+
+	/* register aboot specific fastboot commands */
+	aboot_fastboot_register_commands();
+	/* dump partition table for debug info */
+	partition_dump();
+	/* initialize and start fastboot */
+	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
+	thread_sleep(5000);
+	if (stay_in_fastboot)
+		goto wait_for_commands;
+
+
 #if QUECTEL_FASTBOOT
 	if(quectel_is_fastboot_entry_force())// check fastboot download flag.
 	{
@@ -3698,7 +3676,7 @@ void aboot_init(const struct app_descriptor *app)
 
 	if (fastboot_trigger())
 		boot_into_fastboot = true;
-
+	
 
 #if USE_PON_REBOOT_REG
 	reboot_mode = check_hard_reboot_mode();
@@ -3707,7 +3685,7 @@ void aboot_init(const struct app_descriptor *app)
 #endif
 	if (reboot_mode == RECOVERY_MODE)
 	{
-        boot_into_recovery = 1;
+		boot_into_recovery = 1;
 	}
 	else if(reboot_mode == FASTBOOT_MODE)
 	{
@@ -3718,9 +3696,6 @@ void aboot_init(const struct app_descriptor *app)
 		boot_reason_alarm = true;
 	}
 
-#if MMC_SDHCI_SUPPORT
-	quectel_sd_fastboot();
-#endif
 normal_boot:
 	if (!boot_into_fastboot)
 	{
@@ -3746,7 +3721,6 @@ normal_boot:
 		else
 		{
 			recovery_init();
-			fota_info_check();
 	#if USE_PCOM_SECBOOT
 		if((device.is_unlocked) || (device.is_tampered))
 			set_tamper_flag(device.is_tampered);
@@ -3766,13 +3740,16 @@ fastboot:
 	/* We are here means regular boot did not happen. Start fastboot. */
 
 	/* register aboot specific fastboot commands */
-	aboot_fastboot_register_commands();
+//	aboot_fastboot_register_commands();
 
 	/* dump partition table for debug info */
-	partition_dump();
+//	partition_dump();
 
 	/* initialize and start fastboot */
-	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
+//	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
+
+wait_for_commands:
+dprintf(CRITICAL, "Finishing aboot_init\n");
 }
 
 uint32_t get_page_size()
