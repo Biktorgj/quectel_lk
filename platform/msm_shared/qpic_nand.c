@@ -1265,26 +1265,15 @@ qpic_nand_non_onfi_probe(struct flash_info *flash)
 
 	/* Read the nand id. */
 	qpic_nand_fetch_id(flash);
-/*bik*/
+
 	/* Check if we support the device */
 	for (index = 0; index < (ARRAY_SIZE(supported_flash)); index++)
 	{
-    dprintf(CRITICAL, "Flash ID: 0x%x\n", flash->id);
-    dprintf(CRITICAL, "Mask: 0x%x\n", (flash->id & supported_flash[index].mask));
-    dprintf(CRITICAL, "Flash ID2: 0x%x\n", flash->id2);
-    dprintf(CRITICAL, "Mask ID2: 0x%x\n", (flash->id2 & supported_flash[index].mask2));
-
-    dprintf(CRITICAL, "Checking against \n");
-    dprintf(CRITICAL, "Arr. ID %d \n", index);
-    dprintf(CRITICAL, "ID: 0x%x\n",supported_flash[index].flash_id );
-    dprintf(CRITICAL, "ID2: 0x%x\n",supported_flash[index].flash_id2 );
-
 		if (((flash->id & supported_flash[index].mask) ==
 		    (supported_flash[index].flash_id & (supported_flash[index].mask))) &&
 		    ((flash->id2 & supported_flash[index].mask2) ==
 		    (supported_flash[index].flash_id2 & (supported_flash[index].mask2))))
 		{
-      dprintf(CRITICAL, " --- DEVICE FOUND\n");
 			dev_found = 1;
 			break;
 		}
@@ -1292,38 +1281,26 @@ qpic_nand_non_onfi_probe(struct flash_info *flash)
 
 	if (dev_found)
 	{
-    dprintf(CRITICAL, "   -- Set page size\n");
 		flash->page_size = supported_flash[index].pagesize;
-    dprintf(CRITICAL, "   -- Set block size\n");
 		flash->block_size = supported_flash[index].blksize;
-    dprintf(CRITICAL, "   -- Set spare size\n");
 		flash->spare_size = supported_flash[index].oobsize;
-    dprintf(CRITICAL, "   -- Get ECC Bits\n");
 		ecc_bits = supported_flash[index].ecc_8_bits;
 
 		/* Make sure that the block size and page size are defined. */
-    dprintf(CRITICAL, "   -- Assert block size\n");
 		ASSERT(flash->block_size);
-    dprintf(CRITICAL, "   -- Assert page size\n");
 		ASSERT(flash->page_size);
 
-    dprintf(CRITICAL, "   -- Get num blocks from array\n");
 		flash->num_blocks = supported_flash[index].density;
-    dprintf(CRITICAL, "   -- Divide block size and num blocks\n");
 		flash->num_blocks /= (flash->block_size);
-    dprintf(CRITICAL, "   -- Get pages per block\n");
 		flash->num_pages_per_blk = flash->block_size / flash->page_size;
-    dprintf(CRITICAL, "   -- Get pages per block mask\n");
 		flash->num_pages_per_blk_mask = flash->num_pages_per_blk - 1;
 
 		/* Look for 8bit BCH ECC Nand, TODO: ECC Correctability >= 8 */
-		if (ecc_bits) {
-    dprintf(CRITICAL, "   -- Set 8 bit ECC\n");
+		if (ecc_bits)
 			flash->ecc_width = NAND_WITH_8_BIT_ECC;
-    } else {
-      dprintf(CRITICAL, "   -- Set 4 bit ecc\n");
+		else
 			flash->ecc_width = NAND_WITH_4_BIT_ECC;
-    }
+
 		flash->density = supported_flash[index].density;
 		flash->widebus = supported_flash[index].widebus;
 
@@ -1333,8 +1310,8 @@ qpic_nand_non_onfi_probe(struct flash_info *flash)
 	/* Flash device is not supported, print flash device info and halt */
 	if (dev_found == 0)
 	{
-		dprintf(CRITICAL, "WWWWWWW NAND device is not supported: nandid: 0x%x"
-						  " maker=0x%02x device=0x%02x\n",
+		dprintf(CRITICAL, "NAND device is not supported: nandid: 0x%x"
+						  "maker=0x%02x device=0x%02x\n",
 				flash->id,
 				flash->vendor,
 				flash->device);
@@ -1361,14 +1338,11 @@ qpic_nand_init(struct qpic_nand_init_config *config)
 	nand_base = config->nand_base;
 
 	qpic_bam_init(config);
-  dprintf(CRITICAL, "NAND: ONFI Probe\n");
 
 	qpic_nand_non_onfi_probe(&flash);
-  dprintf(CRITICAL, "NAND: Save config\n");
 
 	/* Save the RAW and read/write configs */
 	qpic_nand_save_config(&flash);
-  dprintf(CRITICAL, "The fatal malloc\n");
 
 	flash_spare_bytes = (unsigned char *)malloc(flash.spare_size);
 
