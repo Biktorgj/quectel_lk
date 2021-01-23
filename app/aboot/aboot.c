@@ -3076,11 +3076,82 @@ void cmd_reboot_bootloader(const char *arg, void *data, unsigned sz)
 	reboot_device(FASTBOOT_MODE);
 }
 
+void cmd_dump_efs(const char *arg, void *data, unsigned sz)
+{
+/*	struct ptentry *ptn;
+	struct ptable *ptable;
+	ptable = flash_get_ptable();
+	uint32_t pagesize = flash_page_size();
+	uint32_t blocksize = flash_block_size();
+	unsigned offset = 0;
+	unsigned char buf[2048];
+	int i = 0;
+	if (ptable == NULL) {
+		fastboot_fail("Error: Cannot find partition table \n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "efs2");
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "Can't find efs partition\n");
+	} else {
+		if (flash_read(ptn, offset, (void *)buf, sizeof(buf))) {
+			fastboot_fail("Error reading efs");
+		} else {
+			fastboot_fail (buf);
+			fastboot_fail ("test");
+		}
+
+	}
+
+	stay_in_fastboot = true;*/
+	fastboot_fail("Disabled!");
+}
+
+
+void cmd_get_manufacturer(const char *arg, void *data, unsigned sz)
+{
+	struct ptentry *ptn;
+	struct ptable *ptable;
+	ptable = flash_get_ptable();
+	bool misc_detected = true;
+	bool efsbck_detected = true;
+	if (ptable == NULL) {
+		fastboot_fail("Error: Cannot find partition table \n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "misc");
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "Can't find misc partition\n");
+		misc_detected = false;
+	}
+	ptn = ptable_find(ptable, "efs_backup");
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "Can't find efs2 partition\n");
+		efsbck_detected = false;
+	}
+	if (misc_detected && !efsbck_detected) {
+		fastboot_fail("This is a Quectel Modem");
+	} else if (!misc_detected && efsbck_detected) {
+		fastboot_fail("This is a Simcom Modem");
+	} else if (misc_detected && efsbck_detected) {
+		fastboot_fail("Partition table is corrupt");
+	} else {
+		fastboot_fail("I don't know what this is");
+	}
+
+	stay_in_fastboot = true;
+}
+
 void cmd_stay_in_fastboot(const char *arg, void *data, unsigned sz)
 {
 	stay_in_fastboot = true;
 	fastboot_fail("Waiting for orders!");
 }
+void cmd_set_cmdline(const char *arg, void *data, unsigned sz)
+{
+
+}
+
 
 void cmd_reboot_recovery(const char *arg, void *data, unsigned sz)
 {
@@ -3498,6 +3569,8 @@ void aboot_fastboot_register_commands(void)
 											{"reboot-bootloader", cmd_reboot_bootloader},
 											{"oem reboot-recovery", cmd_reboot_recovery},
 											{"oem stay", cmd_stay_in_fastboot},
+											{"oem getmfg", cmd_get_manufacturer},
+											{"oem dump", cmd_dump_efs},
 											{"oem unlock", cmd_oem_unlock},
 											{"oem unlock-go", cmd_oem_unlock_go},
 											{"oem lock", cmd_oem_lock},

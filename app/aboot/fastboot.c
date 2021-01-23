@@ -36,6 +36,7 @@
 #include <kernel/thread.h>
 #include <kernel/event.h>
 #include <dev/udc.h>
+#include <pm8x41_regulator.h>
 #include "fastboot.h"
 
 #ifdef USB30_SUPPORT
@@ -492,6 +493,19 @@ static void cmd_download(const char *arg, void *data, unsigned sz)
 	fastboot_okay("");
 }
 
+static void cmd_oem_dump_regulators(const char *arg, void *data, unsigned sz)
+{
+	char response[MAX_RSP_SIZE];
+	struct spmi_regulator *vreg;
+	for (vreg = target_get_regulators(); vreg->name; ++vreg) {
+		snprintf(response, sizeof(response), "%s: enabled: %d, voltage: %d mV",
+			 vreg->name, regulator_is_enabled(vreg),
+			 regulator_get_voltage(vreg));
+		fastboot_info(response);
+	}
+	fastboot_okay("");
+}
+
 static void fastboot_command_loop(void)
 {
 	struct fastboot_cmd *cmd;
@@ -637,6 +651,7 @@ int fastboot_init(void *base, unsigned size)
 	fastboot_register("getvar:", cmd_getvar);
 	fastboot_register("download:", cmd_download);
 	fastboot_publish("version", "0.5");
+	fastboot_register("oem dump-regulators", cmd_oem_dump_regulators);
 
 	thr = thread_create("fastboot", fastboot_handler, 0, DEFAULT_PRIORITY, 4096);
 	if (!thr)

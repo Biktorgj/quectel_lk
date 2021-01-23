@@ -38,6 +38,7 @@
 #include <dev/keys.h>
 #include <spmi_v2.h>
 #include <pm8x41.h>
+#include <pm8x41_regulator.h>
 #include <board.h>
 #include <baseband.h>
 #include <hsusb.h>
@@ -481,4 +482,34 @@ void target_crypto_init_params()
 	*/
 	ce_params.do_bam_init      = 0;
 	crypto_init_params(&ce_params);
+}
+
+static struct spmi_regulator pm8019_regulators[] = {
+	{"s1", 0x11400},
+	{"s2", 0x11700},
+	{"s3", 0x11a00},
+	{"s4", 0x11d00},
+	{"l1", 0x14000},
+	{"l2", 0x14100},
+	{"l3", 0x14200},
+	{"l4", 0x14300},
+	{"l5", 0x14400},
+	{"l6", 0x14500},
+	{"l7", 0x14600},
+	{"l8", 0x14700},
+	{"l9", 0x14800},
+	{"l10", 0x14900},
+	{"l11", 0x14a00},
+	{"l12", 0x14b00},
+	{"l13", 0x14c00},
+	{"l14", 0x14d00},
+	{"ldo_xo", 0x14e00},
+	{"ldo_rfclk", 0x14f00},
+	{ },
+};
+
+struct spmi_regulator* target_get_regulators()
+{
+	regulators_init(pm8019_regulators);
+	return pm8019_regulators;
 }
