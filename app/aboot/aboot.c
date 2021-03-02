@@ -3700,7 +3700,7 @@ void aboot_init(const struct app_descriptor *app)
 	partition_dump();
 	/* initialize and start fastboot */
 	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
-	thread_sleep(5000);
+	thread_sleep(2000);
 	if (stay_in_fastboot)
 		goto wait_for_commands;
 
