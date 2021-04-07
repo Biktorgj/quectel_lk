@@ -3061,7 +3061,7 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
 
 void cmd_reboot(const char *arg, void *data, unsigned sz)
 {
-	dprintf(INFO, "rebooting the device\n");
+	dprintf(INFO, "Rebooting the device\n");
 #if QUECTEL_FASTBOOT
 	quectel_fastboot_force_entry_flag_clean();	
 #endif
@@ -3071,42 +3071,17 @@ void cmd_reboot(const char *arg, void *data, unsigned sz)
 
 void cmd_reboot_bootloader(const char *arg, void *data, unsigned sz)
 {
-	dprintf(INFO, "rebooting the device\n");
+	dprintf(INFO, "Rebooting to fastboot\n");
 	fastboot_okay("");
 	reboot_device(FASTBOOT_MODE);
 }
 
-void cmd_dump_efs(const char *arg, void *data, unsigned sz)
+void cmd_reboot_edl(const char *arg, void *data, unsigned sz)
 {
-/*	struct ptentry *ptn;
-	struct ptable *ptable;
-	ptable = flash_get_ptable();
-	uint32_t pagesize = flash_page_size();
-	uint32_t blocksize = flash_block_size();
-	unsigned offset = 0;
-	unsigned char buf[2048];
-	int i = 0;
-	if (ptable == NULL) {
-		fastboot_fail("Error: Cannot find partition table \n");
-		return -1;
-	}
-	ptn = ptable_find(ptable, "efs2");
-	if (ptn == NULL) {
-		dprintf(CRITICAL, "Can't find efs partition\n");
-	} else {
-		if (flash_read(ptn, offset, (void *)buf, sizeof(buf))) {
-			fastboot_fail("Error reading efs");
-		} else {
-			fastboot_fail (buf);
-			fastboot_fail ("test");
-		}
-
-	}
-
-	stay_in_fastboot = true;*/
-	fastboot_fail("Disabled!");
+	dprintf(INFO, "Rebooting to EDL\n");
+	fastboot_okay("");
+	reboot_device(EMERGENCY_DLOAD);
 }
-
 
 void cmd_get_manufacturer(const char *arg, void *data, unsigned sz)
 {
@@ -3566,11 +3541,11 @@ void aboot_fastboot_register_commands(void)
 											{"boot", cmd_boot},
 											{"continue", cmd_continue},
 											{"reboot", cmd_reboot},
+											{"oem reboot-edl", cmd_reboot_edl},
 											{"reboot-bootloader", cmd_reboot_bootloader},
 											{"oem reboot-recovery", cmd_reboot_recovery},
 											{"oem stay", cmd_stay_in_fastboot},
 											{"oem getmfg", cmd_get_manufacturer},
-											{"oem dump", cmd_dump_efs},
 											{"oem unlock", cmd_oem_unlock},
 											{"oem unlock-go", cmd_oem_unlock_go},
 											{"oem lock", cmd_oem_lock},
