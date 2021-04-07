@@ -3076,16 +3076,14 @@ void cmd_reboot_bootloader(const char *arg, void *data, unsigned sz)
 	reboot_device(FASTBOOT_MODE);
 }
 
-
-
 void cmd_reboot_edl(const char *arg, void *data, unsigned sz)
 {
-	target_crypto_init_params();
 	dprintf(INFO, "Rebooting to EDL\n");
 	fastboot_okay("");
 	if (set_download_mode(EMERGENCY_DLOAD)) {
 		dprintf(CRITICAL,"dload mode not supported by target\n");
 	}
+	print_emerg_area();
 	reboot_device(DLOAD);
 }
 
@@ -3136,7 +3134,6 @@ void cmd_set_cmdline(const char *arg, void *data, unsigned sz)
 
 void cmd_reboot_recovery(const char *arg, void *data, unsigned sz)
 {
-
 	struct recovery_message msg;
 	snprintf(msg.recovery, sizeof(msg.recovery), "recovery\n");
 	quectel_recovery_force_entry_flag_set();
@@ -3807,7 +3804,7 @@ fastboot:
 //	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
 
 wait_for_commands:
-dprintf (CRITICAL, "Reboot mode: 0x%x\n", reboot_mode);
+dprintf (CRITICAL, "Reboot reason: 0x%x\n", reboot_mode);
 dprintf(CRITICAL, "Finishing aboot_init\n");
 print_emerg_area();
 }

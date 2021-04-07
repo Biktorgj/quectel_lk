@@ -330,12 +330,19 @@ void target_uninit(void)
 }
 void print_emerg_area() {
 	uint32_t  tempvar;
-	dprintf(CRITICAL, "Value 0x%x\n", tempvar);
-	tempvar = readl(EMERGENCY_DLOAD_MODE_ADDR + sizeof(uint32_t));
-	dprintf(CRITICAL, "Value 0x%x\n", tempvar);
-	tempvar = readl(EMERGENCY_DLOAD_MODE_ADDR + 2*sizeof(uint32_t));
-	dprintf(CRITICAL, "Value 0x%x\n", tempvar);
+	dprintf(CRITICAL, "Print Emergency Dload Mode Area\n");
+	dprintf(CRITICAL, "0x%x ", readl(EMERGENCY_DLOAD_MODE_ADDR));
+	dprintf(CRITICAL, "0x%x ", readl(EMERGENCY_DLOAD_MODE_ADDR + sizeof(uint32_t)));
+	dprintf(CRITICAL, "0x%x \n", readl(EMERGENCY_DLOAD_MODE_ADDR + 2* sizeof(uint32_t)));
+	
+	dprintf(CRITICAL, "DLOAD Mode area\n");
+	dprintf(CRITICAL, "0x%x ", readl(DLOAD_MODE_ADDR));
+	dprintf(CRITICAL, "0x%x \n", readl(DLOAD_MODE_ADDR + sizeof(unsigned int)));	
+	
+	dprintf(CRITICAL, "Reboot Reason area\n");
+	dprintf(CRITICAL, "0x%x \n", readl(RESTART_REASON_ADDR));
 }
+
 void reboot_device(unsigned reboot_reason)
 {
 	int ret = 0;
