@@ -3076,11 +3076,17 @@ void cmd_reboot_bootloader(const char *arg, void *data, unsigned sz)
 	reboot_device(FASTBOOT_MODE);
 }
 
+
+
 void cmd_reboot_edl(const char *arg, void *data, unsigned sz)
 {
+	target_crypto_init_params();
 	dprintf(INFO, "Rebooting to EDL\n");
 	fastboot_okay("");
-	reboot_device(EMERGENCY_DLOAD);
+	if (set_download_mode(EMERGENCY_DLOAD)) {
+		dprintf(CRITICAL,"dload mode not supported by target\n");
+	}
+	reboot_device(DLOAD);
 }
 
 void cmd_get_manufacturer(const char *arg, void *data, unsigned sz)
@@ -3676,8 +3682,11 @@ void aboot_init(const struct app_descriptor *app)
 	/* initialize and start fastboot */
 	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
 	thread_sleep(2000);
-	if (stay_in_fastboot)
+	if (stay_in_fastboot) {
+		reboot_mode = check_reboot_mode();
 		goto wait_for_commands;
+
+	}
 
 
 #if QUECTEL_FASTBOOT
@@ -3731,6 +3740,7 @@ void aboot_init(const struct app_descriptor *app)
 #else
 	reboot_mode = check_reboot_mode();
 #endif
+
 	if (reboot_mode == RECOVERY_MODE)
 	{
 		boot_into_recovery = 1;
@@ -3797,7 +3807,9 @@ fastboot:
 //	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
 
 wait_for_commands:
+dprintf (CRITICAL, "Reboot mode: 0x%x\n", reboot_mode);
 dprintf(CRITICAL, "Finishing aboot_init\n");
+print_emerg_area();
 }
 
 uint32_t get_page_size()

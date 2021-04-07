@@ -31,6 +31,7 @@
 #include <reg.h>
 #include <target.h>
 #include <platform.h>
+#include <dload_util.h>
 #include <uart_dm.h>
 #include <platform/gpio.h>
 #include <lib/ptable.h>
@@ -50,6 +51,7 @@
 #include <crypto5_wrapper.h>
 #include <partition_parser.h>
 #include <stdlib.h>
+
 
 #if LONG_PRESS_POWER_ON
 #include <shutdown_detect.h>
@@ -175,7 +177,7 @@ void target_init(void)
 	uint32_t base_addr;
 	uint8_t slot;
 
-	dprintf(INFO, "target_init()\n");
+	dprintf(INFO, "Welcome to the Pinephone Modem Bootloader\n");
 
 	spmi_init(PMIC_ARB_CHANNEL_NUM, PMIC_ARB_OWNER_ID);
 
@@ -192,32 +194,18 @@ void target_init(void)
 	config.nand_base = MSM_NAND_BASE;
 	config.ee = QPIC_NAND_EE;
 	config.max_desc_len = QPIC_NAND_MAX_DESC_LEN;
-	dprintf(INFO, "Starting NAND\n");
 
 	qpic_nand_init(&config);
-	dprintf(INFO, "Starting partition table\n");
-
 	ptable_init(&flash_ptable);
-	dprintf(INFO, "SMEM Ptable Init()\n");
-
 	smem_ptable_init();
-	dprintf(INFO, "SMEM: Add Modem Partitions()\n");
-
 	smem_add_modem_partitions(&flash_ptable);
-	dprintf(INFO, "Update PTABLE Names()\n");
-
 	update_ptable_names();
-	dprintf(INFO, "Flash set ptable\n");
-
 	flash_set_ptable(&flash_ptable);
 
 	if (target_use_signed_kernel()) {
 		dprintf(INFO, "Signed kernel enabled, init crypto\n");
 		target_crypto_init_params();
-	} else {
-		dprintf(INFO, "Bik: Not using signed kernel :)\n");
 	}
-
 }
 
 /* Identify the current target */
@@ -340,37 +328,42 @@ void target_uninit(void)
 	if (crypto_initialized())
 		crypto_eng_cleanup();
 }
-
+void print_emerg_area() {
+	uint32_t  tempvar;
+	dprintf(CRITICAL, "Value 0x%x\n", tempvar);
+	tempvar = readl(EMERGENCY_DLOAD_MODE_ADDR + sizeof(uint32_t));
+	dprintf(CRITICAL, "Value 0x%x\n", tempvar);
+	tempvar = readl(EMERGENCY_DLOAD_MODE_ADDR + 2*sizeof(uint32_t));
+	dprintf(CRITICAL, "Value 0x%x\n", tempvar);
+}
 void reboot_device(unsigned reboot_reason)
 {
-	uint8_t reset_type = 0;
+	int ret = 0;
 	struct board_pmic_data pmic_info;
 
 	 /* Write the reboot reason */
 	writel(reboot_reason, RESTART_REASON_ADDR);
-
-	/* Configure PMIC for warm reset */
+		/* Configure PMIC for warm reset */
 	/* PM 8019 v1 aligns with PM8941 v2.
 	* This call should be based on the pmic version
 	* when PM8019 v2 is available.
 	*/
-	if(reboot_reason)
-		reset_type = PON_PSHOLD_WARM_RESET;
-	else
-		reset_type = PON_PSHOLD_HARD_RESET;
-
 	if (board_pmic_info(&pmic_info, SMEM_V7_SMEM_MAX_PMIC_DEVICES))
 	{
 		/* make decision based on pmic major version */
 		switch (pmic_info.pmic_version >>16)
 		{
 			case PMIC_MAJOR_V1:
-				pm8x41_v2_reset_configure(reset_type);
+				pm8x41_v2_reset_configure(PON_PSHOLD_WARM_RESET);
 				break;
-			default:
-				pm8x41_reset_configure(reset_type);
+			default: // EG25 uses this. Need to check the Simcom
+				pm8x41_reset_configure(PON_PSHOLD_WARM_RESET);
 		}
 	}
+	// I don't know if we need this
+//	ret = scm_halt_pmic_arbiter();
+//	if (ret)
+//		dprintf(CRITICAL , "Failed to halt pmic arbiter: %d\n", ret);
 
 	/* Drop PS_HOLD for MSM */
 	writel(0x00, MPM2_MPM_PS_HOLD);
@@ -513,3 +506,17 @@ struct spmi_regulator* target_get_regulators()
 	regulators_init(pm8019_regulators);
 	return pm8019_regulators;
 }
+
+
+int set_download_mode(enum dload_mode mode)
+{
+	dprintf(CRITICAL, "Set download mode cookie: %i \n!", mode);
+
+	dload_util_write_cookie(mode == NORMAL_DLOAD ?
+		DLOAD_MODE_ADDR : EMERGENCY_DLOAD_MODE_ADDR, mode);
+
+	pm8x41_clear_pmic_watchdog();
+	
+	return 0;
+}
+

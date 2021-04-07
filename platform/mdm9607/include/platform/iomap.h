@@ -45,6 +45,9 @@
 #define BS_INFO_ADDR                       (MSM_SHARED_IMEM_BASE + BS_INFO_OFFSET)
 
 #define RESTART_REASON_ADDR                (MSM_SHARED_IMEM_BASE + 0x65C)
+/* Am I missing something? */
+#define DLOAD_MODE_ADDR                    (MSM_SHARED_IMEM_BASE + 0x0)
+#define EMERGENCY_DLOAD_MODE_ADDR          (MSM_SHARED_IMEM_BASE + 0xFE0)
 
 #define MSM_NAND_BASE                      0x79B0000
 /* NAND BAM */

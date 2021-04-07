@@ -522,6 +522,7 @@ ifeq ($(PLATFORM),mdm9607)
 			$(LOCAL_DIR)/board.o \
 			$(LOCAL_DIR)/spmi.o \
 			$(LOCAL_DIR)/bam.o \
+			$(LOCAL_DIR)/dload_util.o \
 			$(LOCAL_DIR)/qpic_nand.o \
 			$(LOCAL_DIR)/crypto_hash.o \
 			$(LOCAL_DIR)/crypto5_eng.o \
