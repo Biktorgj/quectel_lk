@@ -82,11 +82,7 @@ unsigned flash_block_size(void);
 unsigned flash_spare_size(void);
 int flash_ecc_bch_enabled(void);
 
-#if 1 // def  QUECTEL_SYSTEM_BACKUP    // Ramos add for quectel for linuxfs restore
-int Quectel_flash_write(struct ptentry *ptn,unsigned offset,unsigned write_extra_bytes,const void *data,unsigned bytes);
-int Quectel_flash_nand_read(struct ptentry *ptn,unsigned extra_per_page,unsigned offset,void *data,unsigned bytes);
-int Quectel_flash_erase(struct ptentry *ptn, uint32_t EraseSize);
-
-#endif
+/* Used exclusively for passing messages in misc partition to force boot */
+int flash_write_image_offset(struct ptentry *ptn,unsigned offset,unsigned write_extra_bytes,const void *data,unsigned bytes);
 
 #endif /* __DEV_FLASH_H */
