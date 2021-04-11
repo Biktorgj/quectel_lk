@@ -263,7 +263,7 @@ int set_fastboot_message(const struct fastboot_message *in)
 		return -1;
 	}
 
-	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // Ϣڵһblockĵһpage
+	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // 128K blocks, second block
 	memset((void *)temp_buf,0,pagesize);
 	memcpy((void *) temp_buf, in, sizeof(*in));
 	if (Quectel_flash_write(ptn,offset, 0, temp_buf, sizeof(temp_buf))) 
@@ -296,7 +296,7 @@ int get_fastboot_message(const struct fastboot_message *out)
 		return -1;
 	}
 
-	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // Ϣڵһblockĵһpage
+	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // 128K blocks, second block of misc partition
 	memset((void *)temp_buf,0,pagesize);
 	if (flash_read(ptn,offset,temp_buf, sizeof(temp_buf))) 
 	{
@@ -353,14 +353,6 @@ int quectel_is_fastboot_entry_force(void)
 		{
 			return 1;
 		}
-		else
-		{
-			return 0;
-		}
-	}
-	else
-	{
-		return 0;
 	}
 	return 0;
 }
@@ -374,15 +366,9 @@ int quectel_is_recovery_entry_force(void)
 		{
 			return 1;
 		}
-		else
-		{
-			return 0;
-		}
+
 	}
-	else
-	{
-		return 0;
-	}
+
 	return 0;
 }
 #endif
