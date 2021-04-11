@@ -91,7 +91,6 @@
 #include "fastboot_test.h"
 #include "qpic_nand.h"
 
-#define	QUECTEL_FASTBOOT	1  // quectel deine
 extern  bool target_use_signed_kernel(void);
 extern void platform_uninit(void);
 extern void target_uninit(void);
@@ -113,7 +112,7 @@ struct fastboot_cmd_desc {
 };
 
 bool stay_in_fastboot;
-
+int vendor = -1;
 #define EXPAND(NAME) #NAME
 #define TARGET(NAME) EXPAND(NAME)
 
@@ -226,29 +225,67 @@ extern int emmc_recovery_init(void);
 extern int fastboot_trigger(void);
 #endif
 
-static char temp_buf[4096];  // quectel add
-
-#if QUECTEL_FASTBOOT
-/* author:	ramos
- * date:	2017/02/28
- * purpose:	fastboot enter flag set , clean and get
- */
-
 static const int MISC_FASTBOOT_COMMAND_BLOCK=1; //1block
 
 struct fastboot_message {
 	char command[32];
 	char status[32];
+	char empty[1984];
 };
 
-int set_fastboot_message(const struct fastboot_message *in)
-{
+int get_forced_boot_mode() {
 	struct ptentry *ptn;
 	struct ptable *ptable;
 	unsigned offset = 0;
 	unsigned pagesize = flash_page_size();
 	uint32_t blocksize = flash_block_size();
-//	char buffer[4096];
+	ptable = flash_get_ptable();
+	int mode = 0;
+	int ret;
+	/* 
+	 mode:
+	 	0 -> Not set
+		1 -> Fastboot force
+		2 -> Recovery force 
+	*/
+	struct fastboot_message *msg;
+	msg = (struct fastboot_message *) calloc(1, sizeof(struct fastboot_message));
+
+	if (ptable == NULL) {
+		dprintf(CRITICAL, "ERROR: Partition table not found\n");
+		return -1;
+	}
+	ptn = ptable_find(ptable, "misc");
+
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "ERROR: No misc partition found\n");
+		return -1;
+	}
+	offset += MISC_FASTBOOT_COMMAND_BLOCK * blocksize; // 128K blocks, second block of misc partition
+	if (flash_read(ptn,offset,msg, sizeof(msg))) 
+	{
+		dprintf(CRITICAL, "ERROR: Failed to write to misc partition\n");
+		return -1;
+	}
+	if (strcmp(msg->command, "boot_fastboot") == 0 && strcmp(msg->status, "force") == 0) {
+		dprintf(INFO, "Forced boot mode: fastboot\n");
+		mode = 1;
+	} else if (strcmp(msg->command, "boot_recovery") == 0 && strcmp(msg->status, "force") == 0) {
+		dprintf(INFO, "Forced boot mode: recovery\n");
+		mode = 2;
+	}
+	ret = set_next_forced_boot_mode(0); // Clear the flag before exiting
+	return mode;
+}
+
+int set_next_forced_boot_mode(int mode) {
+	struct ptentry *ptn;
+	struct ptable *ptable;
+	struct fastboot_message *msg;
+	unsigned offset = 0;
+	unsigned pagesize = flash_page_size();
+	uint32_t blocksize = flash_block_size();
+	msg = (struct fastboot_message *) calloc(1, sizeof(struct fastboot_message));
 
 	ptable = flash_get_ptable();
 
@@ -263,115 +300,27 @@ int set_fastboot_message(const struct fastboot_message *in)
 		return -1;
 	}
 
-	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // 128K blocks, second block
-	memset((void *)temp_buf,0,pagesize);
-	memcpy((void *) temp_buf, in, sizeof(*in));
-	if (Quectel_flash_write(ptn,offset, 0, temp_buf, sizeof(temp_buf))) 
+	offset += MISC_FASTBOOT_COMMAND_BLOCK * blocksize; // 128K blocks, second block
+	if (mode == 1) {
+		dprintf(INFO, "Set forced boot mode: fastboot\n");
+		strlcpy(msg->command, "boot_fastboot", sizeof(msg->command));	
+		strlcpy(msg->status, "force", sizeof(msg->status));
+	} else if (mode == 2) {
+		dprintf(INFO, "Set forced boot mode: recovery\n");
+		strlcpy(msg->command, "boot_recovery", sizeof(msg->command));	
+		strlcpy(msg->status, "force", sizeof(msg->status));
+	} else {
+		dprintf(INFO, "Forced boot mode clear\n");
+
+	}
+	
+	if (flash_write_image_offset(ptn,offset, 0, msg, 2048)) 
 	{
-		dprintf(CRITICAL, "ERROR: FASTBOOT flash write fail!\n");
+		dprintf(CRITICAL, "ERROR: Failed to write to misc partition\n");
 		return -1;
 	}
 	return 0;
 }
-
-int get_fastboot_message(const struct fastboot_message *out)
-{
-	struct ptentry *ptn;
-	struct ptable *ptable;
-	unsigned offset = 0;
-	unsigned pagesize = flash_page_size();
-	uint32_t blocksize = flash_block_size();
-//	char buffer[4096];
-
-	ptable = flash_get_ptable();
-
-	if (ptable == NULL) {
-		dprintf(CRITICAL, "ERROR: Partition table not found\n");
-		return -1;
-	}
-	ptn = ptable_find(ptable, "misc");
-
-	if (ptn == NULL) {
-		dprintf(CRITICAL, "ERROR: No misc partition found\n");
-		return -1;
-	}
-
-	offset += MISC_FASTBOOT_COMMAND_BLOCK*blocksize; // 128K blocks, second block of misc partition
-	memset((void *)temp_buf,0,pagesize);
-	if (flash_read(ptn,offset,temp_buf, sizeof(temp_buf))) 
-	{
-		dprintf(CRITICAL, "ERROR: FASTBOOT flash write fail!\n");
-		return -1;
-	}
-	memcpy(out, temp_buf, sizeof(*out));
-	return 0;
-}
-
-int quectel_fastboot_force_entry_flag_set(void)
-{
-	struct fastboot_message msg;
-
-	strlcpy(msg.command, "boot_fastboot", sizeof(msg.command));	
-	strlcpy(msg.status, "force", sizeof(msg.status));
-	if(0 != set_fastboot_message(&msg))
-	{
-		return -1;
-	}	
-	return 0 ;
-}
-int quectel_recovery_force_entry_flag_set(void)
-{
-	struct fastboot_message msg;
-
-	strlcpy(msg.command, "boot_recovery", sizeof(msg.command));	
-	strlcpy(msg.status, "force", sizeof(msg.status));
-	if(0 != set_fastboot_message(&msg))
-	{
-		return -1;
-	}	
-	return 0 ;
-}
-int quectel_fastboot_force_entry_flag_clean(void)
-{
-	struct fastboot_message msg;
-
-    memset(&msg, 0, sizeof(msg));
-	if(0 != set_fastboot_message(&msg))
-	{
-		return -1;
-	}
-	return 0 ;
-}
-
-int quectel_is_fastboot_entry_force(void)
-{
-	struct fastboot_message msg;
-
-	if(0 == get_fastboot_message(&msg))
-	{
-		if((!strcmp(msg.command, "boot_fastboot")) && (!strcmp(msg.status, "force")))
-		{
-			return 1;
-		}
-	}
-	return 0;
-}
-int quectel_is_recovery_entry_force(void)
-{
-	struct fastboot_message msg;
-
-	if(0 == get_fastboot_message(&msg))
-	{
-		if((!strcmp(msg.command, "boot_recovery")) && (!strcmp(msg.status, "force")))
-		{
-			return 1;
-		}
-
-	}
-
-	return 0;
-}
-#endif
 
 static void update_ker_tags_rdisk_addr(struct boot_img_hdr *hdr, bool is_arm64)
 {
@@ -3014,16 +2963,6 @@ void cmd_flash_nand(const char *arg, void *data, unsigned sz)
 
 void cmd_flash(const char *arg, void *data, unsigned sz)
 {
-#if QUECTEL_FASTBOOT
-	if(!quectel_is_fastboot_entry_force()) // if the fastboot flag is not set, 
-	{
-		if(0 != quectel_fastboot_force_entry_flag_set())
-		{
-			fastboot_fail("set fastboot force flag failed");
-			return;
-		}
-	}
-#endif
 	if(target_is_emmc_boot())
 		cmd_flash_mmc(arg, data, sz);
 	else
@@ -3048,9 +2987,7 @@ void cmd_continue(const char *arg, void *data, unsigned sz)
 void cmd_reboot(const char *arg, void *data, unsigned sz)
 {
 	dprintf(INFO, "Rebooting the device\n");
-#if QUECTEL_FASTBOOT
-	quectel_fastboot_force_entry_flag_clean();	
-#endif
+
 	fastboot_okay("");
 	reboot_device(0);
 }
@@ -3080,6 +3017,7 @@ void cmd_get_manufacturer(const char *arg, void *data, unsigned sz)
 	ptable = flash_get_ptable();
 	bool misc_detected = true;
 	bool efsbck_detected = true;
+	bool scrub_detected = true;
 	if (ptable == NULL) {
 		fastboot_fail("Error: Cannot find partition table \n");
 		return -1;
@@ -3094,16 +3032,20 @@ void cmd_get_manufacturer(const char *arg, void *data, unsigned sz)
 		dprintf(CRITICAL, "Can't find efs2 partition\n");
 		efsbck_detected = false;
 	}
-	if (misc_detected && !efsbck_detected) {
+	ptn = ptable_find(ptable, "scrub");
+	if (ptn == NULL) {
+		dprintf(CRITICAL, "Can't find scrub partition\n");
+		scrub_detected = false;
+	}
+	if (!misc_detected) {
+		fastboot_fail("Missing misc partition");
+	} else if (misc_detected && !efsbck_detected && !scrub_detected) {
 		fastboot_fail("This is a Quectel Modem");
-	} else if (!misc_detected && efsbck_detected) {
+	} else if (misc_detected && efsbck_detected && scrub_detected) {
 		fastboot_fail("This is a Simcom Modem");
-	} else if (misc_detected && efsbck_detected) {
-		fastboot_fail("Partition table is corrupt");
 	} else {
 		fastboot_fail("I don't know what this is");
 	}
-
 	stay_in_fastboot = true;
 }
 
@@ -3122,7 +3064,7 @@ void cmd_reboot_recovery(const char *arg, void *data, unsigned sz)
 {
 	struct recovery_message msg;
 	snprintf(msg.recovery, sizeof(msg.recovery), "recovery\n");
-	quectel_recovery_force_entry_flag_set();
+	set_next_forced_boot_mode(2); // Set the flag in the misc partition
 	fastboot_okay("");
 	reboot_device(RECOVERY_MODE);
 }
@@ -3585,34 +3527,10 @@ void aboot_fastboot_register_commands(void)
 	fastboot_publish("version-baseband", (const char *) device.radio_version);
 }
 
-#if QUECTEL_FASTBOOT
-/* author:	sam
- * date:	2014/09/19
- * purpose:	CTL+C key, enter the FastBoot
- */
-int quectel_fource_boot(void)
-{
-	char ch, fh = 0;
-	int i;
-	dprintf(CRITICAL,"CTL+C key, enter the FastBoot\n");
-	for (i = 2; i != 0; --i)
-	{
-		if (!getc(&ch))
-		{
-			dprintf(CRITICAL,"%s ch: %x\n", __func__, ch);
-			if (ch == 0x03) ++fh;
-			else fh = 0;
-			if (fh >= 1) return 1;
-		}
-		mdelay(10);
-	}
-	return 0;
-}	
-#endif
-
 void aboot_init(const struct app_descriptor *app)
 {
 	unsigned reboot_mode = 0;
+	int boot_mode = 0;
 	stay_in_fastboot = false;
 	/* Setup page size information for nv storage */
 	if (target_is_emmc_boot())
@@ -3670,19 +3588,12 @@ void aboot_init(const struct app_descriptor *app)
 		goto wait_for_commands;
 
 	}
-
-
-#if QUECTEL_FASTBOOT
-	if(quectel_is_fastboot_entry_force())// check fastboot download flag.
-	{
-		quectel_fastboot_force_entry_flag_clean();
+	boot_mode = get_forced_boot_mode();
+	if (boot_mode == 1) {
 		goto fastboot;
-	} else if (quectel_is_recovery_entry_force()) {
+	} else if (boot_mode == 2) {
 		boot_into_recovery = 1;
-		quectel_fastboot_force_entry_flag_clean(); // remove the flag after setting it
-		
 	}
-#endif
 	/*
 	 * Check power off reason if user force reset,
 	 * if yes phone will do normal boot.
@@ -3771,13 +3682,8 @@ normal_boot:
 		dprintf(CRITICAL, "ERROR: Could not do normal boot. Reverting "
 			"to fastboot mode.\n");
 	}
-#if QUECTEL_FASTBOOT
-/* author:	sam
- * date:	2014/09/19
- * purpose:	CTL+C key, enter the FastBoot
- */
+
 fastboot:
-#endif
 	/* We are here means regular boot did not happen. Start fastboot. */
 
 	/* register aboot specific fastboot commands */
