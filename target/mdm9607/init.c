@@ -260,8 +260,7 @@ int get_target_boot_params(const char *cmdline, const char *part, char **buf)
 {
 	struct ptable *ptable;
 	int system_ptn_index = -1;
-	int modem_ptn_index = -1; //quectel add 20180312 modem partition index
-	uint32_t buflen = strlen(UBI_CMDLINE) + strlen(" root=ubi0:rootfs ubi.mtd=") + 2 * sizeof(int) + 1 + strlen(" ubi.mtd="); /* 1 byte for null character,jun20160709*/
+	uint32_t buflen = strlen(UBI_CMDLINE) + strlen(" root=ubi0:rootfs ubi.mtd=") + sizeof(int) + 1; /* 1 byte for null character*/
 
 	*buf = (char *)malloc(buflen);
 	if(!(*buf)) {
@@ -282,15 +281,6 @@ int get_target_boot_params(const char *cmdline, const char *part, char **buf)
 		free(*buf);
 		return -1;
 	}
-	//quectel 20180312 add start get modem partition index
- 	modem_ptn_index = ptable_get_index(ptable, "modem");
-	if (modem_ptn_index < 0) {
-		dprintf(CRITICAL,"WARN: Cannot get modem partition index for %s\n", "modem");
-		free(*buf);
-		return -1;
-	}
-	//quectel 20180312 add end
-
 	/* Adding command line parameters according to target boot type */
 	snprintf(*buf, buflen, UBI_CMDLINE);
 
@@ -301,7 +291,7 @@ int get_target_boot_params(const char *cmdline, const char *part, char **buf)
 		(strstr(cmdline, " root="))))
 		dprintf(DEBUG, "DEBUG: cmdline has root=\n");
 	else
-		snprintf(*buf+strlen(*buf), buflen, " root=ubi0:rootfs ubi.mtd=%d ubi.mtd=%d", system_ptn_index, modem_ptn_index);// quectel add modem ubi index in here
+		snprintf(*buf+strlen(*buf), buflen, " root=ubi0:rootfs ubi.mtd=%d", system_ptn_index);
 		/*in success case buf will be freed in the calling function of this*/
 	return 0;
 }
