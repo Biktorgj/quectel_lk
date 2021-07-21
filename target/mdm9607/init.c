@@ -260,7 +260,7 @@ int get_target_boot_params(const char *cmdline, const char *part, char **buf)
 {
 	struct ptable *ptable;
 	int system_ptn_index = -1;
-	uint32_t buflen = strlen(UBI_CMDLINE) + strlen(" root=ubi0:rootfs ubi.mtd=") + sizeof(int) + 1; /* 1 byte for null character*/
+	uint32_t buflen = strlen(UBI_CMDLINE) + strlen(" root=ubi0:rootfs ubi.mtd=") + sizeof(int) + (10 * sizeof(char)) + 1; /* 1 byte for null character*/
 
 	*buf = (char *)malloc(buflen);
 	if(!(*buf)) {
@@ -291,7 +291,7 @@ int get_target_boot_params(const char *cmdline, const char *part, char **buf)
 		(strstr(cmdline, " root="))))
 		dprintf(DEBUG, "DEBUG: cmdline has root=\n");
 	else
-		snprintf(*buf+strlen(*buf), buflen, " root=ubi0:rootfs ubi.mtd=%d", system_ptn_index);
+		snprintf(*buf+strlen(*buf), buflen, " root=ubi0:rootfs ubi.mtd=%d ubi.mtd=11", system_ptn_index);
 		/*in success case buf will be freed in the calling function of this*/
 	return 0;
 }
