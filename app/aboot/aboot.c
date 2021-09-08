@@ -3052,7 +3052,7 @@ void cmd_get_manufacturer(const char *arg, void *data, unsigned sz)
 void cmd_stay_in_fastboot(const char *arg, void *data, unsigned sz)
 {
 	stay_in_fastboot = true;
-	fastboot_fail("Waiting for orders!");
+	fastboot_okay("Waiting for orders!");
 }
 void cmd_set_cmdline(const char *arg, void *data, unsigned sz)
 {
