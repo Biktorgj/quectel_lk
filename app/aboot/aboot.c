@@ -59,6 +59,8 @@
 #include <image_verify.h>
 #include <decompress.h>
 #include <platform/timer.h>
+#include <reg.h>
+
 #if USE_RPMB_FOR_DEVINFO
 #include <rpmb.h>
 #endif
@@ -115,7 +117,7 @@ bool stay_in_fastboot;
 int vendor = -1;
 #define EXPAND(NAME) #NAME
 #define TARGET(NAME) EXPAND(NAME)
-
+#define WAIT_PERIOD 2000
 #ifdef MEMBASE
 #define EMMC_BOOT_IMG_HEADER_ADDR (0xFF000+(MEMBASE))
 #else
@@ -270,11 +272,13 @@ int get_forced_boot_mode() {
 	if (strcmp(msg->command, "boot_fastboot") == 0 && strcmp(msg->status, "force") == 0) {
 		dprintf(INFO, "Forced boot mode: fastboot\n");
 		mode = 1;
+		ret = set_next_forced_boot_mode(0); // Clear the flag before exiting
 	} else if (strcmp(msg->command, "boot_recovery") == 0 && strcmp(msg->status, "force") == 0) {
 		dprintf(INFO, "Forced boot mode: recovery\n");
 		mode = 2;
+		ret = set_next_forced_boot_mode(0); // Clear the flag before exiting
+
 	}
-	ret = set_next_forced_boot_mode(0); // Clear the flag before exiting
 	return mode;
 }
 
@@ -311,6 +315,7 @@ int set_next_forced_boot_mode(int mode) {
 		strlcpy(msg->status, "force", sizeof(msg->status));
 	} else {
 		dprintf(INFO, "Forced boot mode clear\n");
+		writel(0, RESTART_REASON_ADDR);
 
 	}
 	
@@ -3533,13 +3538,10 @@ void aboot_init(const struct app_descriptor *app)
 	int boot_mode = 0;
 	stay_in_fastboot = false;
 	/* Setup page size information for nv storage */
-	if (target_is_emmc_boot())
-	{
+	if (target_is_emmc_boot()) {
 		page_size = mmc_page_size();
 		page_mask = page_size - 1;
-	}
-	else
-	{
+	} else {
 		page_size = flash_page_size();
 		page_mask = page_size - 1;
 	}
@@ -3549,32 +3551,15 @@ void aboot_init(const struct app_descriptor *app)
 	read_device_info(&device);
 	read_allow_oem_unlock(&device);
 
-	/* Display splash screen if enabled */
-#if DISPLAY_SPLASH_SCREEN
-#if NO_ALARM_DISPLAY
-	if (!check_alarm_boot()) {
-#endif
-		dprintf(SPEW, "Display Init: Start\n");
-#if ENABLE_WBC
-		/* Wait if the display shutdown is in progress */
-		while(pm_app_display_shutdown_in_prgs());
-		if (!pm_appsbl_display_init_done())
-			target_display_init(device.display_panel);
-		else
-			display_image_on_screen();
-#else
-		target_display_init(device.display_panel);
-#endif
-		dprintf(SPEW, "Display Init: Done\n");
-#if NO_ALARM_DISPLAY
-	}
-#endif
-#endif
-
 	target_serialno((unsigned char *) sn_buf);
 	dprintf(SPEW,"serial number: %s\n",sn_buf);
 
-	memset(display_panel_buf, '\0', MAX_PANEL_BUF_SIZE);
+	boot_mode = get_forced_boot_mode();
+	#if USE_PON_REBOOT_REG
+		reboot_mode = check_hard_reboot_mode();
+	#else
+		reboot_mode = check_reboot_mode();
+	#endif
 
 	/* register aboot specific fastboot commands */
 	aboot_fastboot_register_commands();
@@ -3582,15 +3567,13 @@ void aboot_init(const struct app_descriptor *app)
 	partition_dump();
 	/* initialize and start fastboot */
 	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
-	thread_sleep(2000);
-	if (stay_in_fastboot) {
-		reboot_mode = check_reboot_mode();
-		goto wait_for_commands;
+	/* Sleep for 2 seconds here in case user sends oem stay command */
+	thread_sleep(WAIT_PERIOD);
 
-	}
-	boot_mode = get_forced_boot_mode();
-	if (boot_mode == 1) {
+	if (stay_in_fastboot || boot_mode == 1 || fastboot_trigger()) {
+		boot_into_fastboot = true;
 		goto fastboot;
+
 	} else if (boot_mode == 2) {
 		boot_into_recovery = 1;
 	}
@@ -3600,53 +3583,20 @@ void aboot_init(const struct app_descriptor *app)
 	 */
 	if (is_user_force_reset())
 		goto normal_boot;
-
-	/* Check if we should do something other than booting up */
-	if (keys_get_state(KEY_VOLUMEUP) && keys_get_state(KEY_VOLUMEDOWN))
-	{
-		dprintf(ALWAYS,"dload mode key sequence detected\n");
-		if (set_download_mode(EMERGENCY_DLOAD))
-		{
-			dprintf(CRITICAL,"dload mode not supported by target\n");
-		}
-		else
-		{
-			reboot_device(DLOAD);
-			dprintf(CRITICAL,"Failed to reboot into dload mode\n");
-		}
-		boot_into_fastboot = true;
-	}
-	if (!boot_into_fastboot)
-	{
-		if (keys_get_state(KEY_HOME) || keys_get_state(KEY_VOLUMEUP))
-			boot_into_recovery = 1;
-		if (!boot_into_recovery &&
-			(keys_get_state(KEY_BACK) || keys_get_state(KEY_VOLUMEDOWN)))
-			boot_into_fastboot = true;
-	}
-
-	if (fastboot_trigger())
-		boot_into_fastboot = true;
 	
 
-#if USE_PON_REBOOT_REG
-	reboot_mode = check_hard_reboot_mode();
-#else
-	reboot_mode = check_reboot_mode();
-#endif
+	switch (reboot_mode) {
+		case RECOVERY_MODE:
+			boot_into_recovery = 1;
+			break;
+		case FASTBOOT_MODE:
+			boot_into_fastboot = true;
+			break;
+		case ALARM_BOOT:
+			boot_reason_alarm = true;
+			break;
+	}
 
-	if (reboot_mode == RECOVERY_MODE)
-	{
-		boot_into_recovery = 1;
-	}
-	else if(reboot_mode == FASTBOOT_MODE)
-	{
-		boot_into_fastboot = true;
-	}
-	else if(reboot_mode == ALARM_BOOT)
-	{
-		boot_reason_alarm = true;
-	}
 
 normal_boot:
 	if (!boot_into_fastboot)
@@ -3673,10 +3623,6 @@ normal_boot:
 		else
 		{
 			recovery_init();
-	#if USE_PCOM_SECBOOT
-		if((device.is_unlocked) || (device.is_tampered))
-			set_tamper_flag(device.is_tampered);
-	#endif
 			boot_linux_from_flash();
 		}
 		dprintf(CRITICAL, "ERROR: Could not do normal boot. Reverting "
@@ -3685,20 +3631,9 @@ normal_boot:
 
 fastboot:
 	/* We are here means regular boot did not happen. Start fastboot. */
-
-	/* register aboot specific fastboot commands */
-//	aboot_fastboot_register_commands();
-
-	/* dump partition table for debug info */
-//	partition_dump();
-
-	/* initialize and start fastboot */
-//	fastboot_init(target_get_scratch_address(), target_get_max_flash_size());
-
-wait_for_commands:
-dprintf (CRITICAL, "Reboot reason: 0x%x\n", reboot_mode);
-dprintf(CRITICAL, "Finishing aboot_init\n");
-print_emerg_area();
+	dprintf (CRITICAL, "Reboot reason: 0x%x\n", reboot_mode);
+	dprintf(CRITICAL, "Finishing aboot_init\n");
+	print_emerg_area();
 }
 
 uint32_t get_page_size()
