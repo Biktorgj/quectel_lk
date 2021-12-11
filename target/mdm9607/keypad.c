@@ -51,7 +51,7 @@ int get_fastboot_key_state(void)
 
 	ret = gpio_get_state(FASTBOOT_KEY_GPIO_ID);
 
-	return !ret;
+	return 0; //!ret;
 }
 
 /*
